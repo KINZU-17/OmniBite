@@ -1,0 +1,31 @@
+# Local dev dependencies for OmniBite. Start with: docker compose up -d
+# (Requires Docker; not yet installed on this machine.)
+services:
+  postgres:
+    image: postgres:16
+    container_name: omnibite-postgres
+    environment:
+      POSTGRES_USER: omnibite
+      POSTGRES_PASSWORD: omnibite
+      POSTGRES_DB: omnibite
+    ports:
+      - "5432:5432"
+    volumes:
+      - omnibite_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnibite"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: omnibite-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - omnibite_redisdata:/data
+
+volumes:
+  omnibite_pgdata:
+  omnibite_redisdata:

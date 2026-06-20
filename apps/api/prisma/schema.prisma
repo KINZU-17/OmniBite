@@ -1,0 +1,584 @@
+// OmniBite — Phase 1 data model.
+// Mirrors omnibite-complete-spec.md (Phase 1 Data Model) one-to-one. Table and enum names map to
+// the exact snake_case identifiers from the spec DDL so the database and application speak the same
+// language. Money is Decimal(12,2) in KES; ids are UUIDs.
+//
+// Minor, intentional strengthenings of the spec, all consistent with its stated intent:
+//  - mpesa_transactions.payment_id and card_transactions.payment_id are UNIQUE (one detail row per
+//    payment), which makes the 1:1 relation explicit.
+//  - restaurant_tables.current_session_id is UNIQUE (a session is current for at most one table).
+// Three spec constructs Prisma cannot express in-schema (partial indexes) live in
+// prisma/sql/partial-indexes.sql and must be applied after migration. See that file.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums — exact states from the Phase 1 state machine
+// ---------------------------------------------------------------------------
+
+enum SessionStatus {
+  ACTIVE
+  SETTLED
+  NEEDS_BUSSING
+  CLOSED
+
+  @@map("session_status")
+}
+
+enum RoundStatus {
+  BUILDING
+  SUBMITTED
+  AWAITING_PAYMENT
+  PARTIALLY_PAID
+  PAID
+  FIRED
+  SERVED
+  CANCELLED
+
+  @@map("round_status")
+}
+
+enum SettlementMode {
+  SINGLE_PAYER
+  SPLIT
+
+  @@map("settlement_mode")
+}
+
+enum RoundItemStatus {
+  ACTIVE
+  DROPPED_UNPAID
+  REFUNDED
+
+  @@map("round_item_status")
+}
+
+enum PaymentMethod {
+  MPESA
+  CARD
+  CASH
+
+  @@map("payment_method")
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  UNKNOWN
+  CONFIRMED
+  FAILED
+
+  @@map("payment_status")
+}
+
+enum TicketStatus {
+  QUEUED
+  IN_PREP
+  READY
+  SERVED
+
+  @@map("ticket_status")
+}
+
+enum Station {
+  GRILL
+  COLD
+  FRY
+  PASS
+
+  @@map("station")
+}
+
+enum EtimsStatus {
+  PENDING
+  TRANSMITTED
+  FAILED
+
+  @@map("etims_status")
+}
+
+enum EtimsDocType {
+  INVOICE
+  CREDIT_NOTE
+
+  @@map("etims_doc_type")
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  RESOLVED_CREDIT
+  REVERSAL_PENDING
+  REVERSED
+  REVERSAL_FAILED
+
+  @@map("refund_status")
+}
+
+enum StaffRole {
+  SERVER
+  MANAGER
+  KITCHEN
+  ADMIN
+
+  @@map("staff_role")
+}
+
+enum TableFloorState {
+  OPEN
+  SEATED
+  ORDERED
+  FOOD_RUNNING
+  PAID
+  NEEDS_BUSSING
+
+  @@map("table_floor_state")
+}
+
+// ---------------------------------------------------------------------------
+// Reference and config
+// ---------------------------------------------------------------------------
+
+model Location {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId        String   @map("group_id") @db.Uuid
+  name           String
+  kraPin         String   @map("kra_pin") // seller PIN for eTIMS
+  mpesaShortcode String   @map("mpesa_shortcode") // paybill or till
+  timezone       String   @default("Africa/Nairobi")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tables             RestaurantTable[]
+  staff              Staff[]
+  menuItems          MenuItem[]
+  sessions           TableSession[]
+  kitchenTickets     KitchenTicket[]
+  etimsInvoices      EtimsInvoice[]
+  auditLogs          AuditLog[]
+  cashDrawerSessions CashDrawerSession[]
+  reconciliationRuns MpesaReconciliationRun[]
+
+  @@map("locations")
+}
+
+model RestaurantTable {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId       String          @map("location_id") @db.Uuid
+  tableNumber      String          @map("table_number")
+  qrToken          String          @unique @map("qr_token") // signed, server-validated, rotatable
+  floorState       TableFloorState @default(OPEN) @map("floor_state")
+  currentSessionId String?         @unique @map("current_session_id") @db.Uuid
+
+  location       Location       @relation(fields: [locationId], references: [id])
+  currentSession TableSession?  @relation("CurrentSession", fields: [currentSessionId], references: [id])
+  sessions       TableSession[] @relation("TableSessions")
+
+  @@unique([locationId, tableNumber])
+  @@map("restaurant_tables")
+}
+
+model Staff {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId String    @map("location_id") @db.Uuid
+  name       String
+  role       StaffRole
+  pinHash    String    @map("pin_hash")
+  active     Boolean   @default(true)
+
+  location           Location            @relation(fields: [locationId], references: [id])
+  auditLogs          AuditLog[]
+  refundsRequested   Refund[]            @relation("RefundRequestedBy")
+  refundsApproved    Refund[]            @relation("RefundApprovedBy")
+  cashDrawerSessions CashDrawerSession[]
+
+  @@map("staff")
+}
+
+// ---------------------------------------------------------------------------
+// Menu
+// ---------------------------------------------------------------------------
+
+model MenuItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId  String  @map("location_id") @db.Uuid
+  name        String
+  description String?
+  basePrice   Decimal @map("base_price") @db.Decimal(12, 2)
+  photoUrl    String? @map("photo_url")
+  category    String?
+  prepSeconds Int     @default(600) @map("prep_seconds") // feeds the time estimate
+  itemCode    String  @map("item_code") // required on the eTIMS invoice line
+  taxRate     Decimal @default(16.00) @map("tax_rate") @db.Decimal(5, 2)
+  is86        Boolean @default(false) @map("is_86")
+
+  location       Location                @relation(fields: [locationId], references: [id])
+  allergens      MenuItemAllergen[]
+  modifierGroups MenuItemModifierGroup[]
+  roundItems     RoundItem[]
+
+  @@map("menu_items")
+}
+
+model MenuItemAllergen {
+  menuItemId String @map("menu_item_id") @db.Uuid
+  allergen   String
+
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@id([menuItemId, allergen])
+  @@map("menu_item_allergens")
+}
+
+model ModifierGroup {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  minSelect Int    @default(0) @map("min_select")
+  maxSelect Int    @default(1) @map("max_select")
+
+  modifiers Modifier[]
+  menuItems MenuItemModifierGroup[]
+
+  @@map("modifier_groups")
+}
+
+model Modifier {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  modifierGroupId String  @map("modifier_group_id") @db.Uuid
+  name            String
+  priceDelta      Decimal @default(0) @map("price_delta") @db.Decimal(12, 2)
+
+  modifierGroup      ModifierGroup       @relation(fields: [modifierGroupId], references: [id])
+  roundItemModifiers RoundItemModifier[]
+
+  @@map("modifiers")
+}
+
+model MenuItemModifierGroup {
+  menuItemId      String @map("menu_item_id") @db.Uuid
+  modifierGroupId String @map("modifier_group_id") @db.Uuid
+
+  menuItem      MenuItem      @relation(fields: [menuItemId], references: [id])
+  modifierGroup ModifierGroup @relation(fields: [modifierGroupId], references: [id])
+
+  @@id([menuItemId, modifierGroupId])
+  @@map("menu_item_modifier_groups")
+}
+
+// ---------------------------------------------------------------------------
+// Sessions, rounds, items
+// ---------------------------------------------------------------------------
+
+model TableSession {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tableId    String        @map("table_id") @db.Uuid
+  locationId String        @map("location_id") @db.Uuid
+  status     SessionStatus @default(ACTIVE)
+  openedAt   DateTime      @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt   DateTime?     @map("closed_at") @db.Timestamptz(6)
+
+  table           RestaurantTable      @relation("TableSessions", fields: [tableId], references: [id])
+  location        Location             @relation(fields: [locationId], references: [id])
+  currentForTable RestaurantTable?     @relation("CurrentSession")
+  participants    SessionParticipant[]
+  rounds          Round[]
+
+  @@map("table_sessions")
+}
+
+model SessionParticipant {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String  @map("session_id") @db.Uuid
+  displayName String? @map("display_name")
+  phone       String? // used for receipt and STK push
+  deviceId    String? @map("device_id")
+
+  session    TableSession @relation(fields: [sessionId], references: [id])
+  roundItems RoundItem[]
+  payments   Payment[]
+
+  @@map("session_participants")
+}
+
+model Round {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId              String          @map("session_id") @db.Uuid
+  status                 RoundStatus     @default(BUILDING)
+  settlementMode         SettlementMode? @map("settlement_mode")
+  submittedAt            DateTime?       @map("submitted_at") @db.Timestamptz(6)
+  paidAt                 DateTime?       @map("paid_at") @db.Timestamptz(6)
+  paymentWindowExpiresAt DateTime?       @map("payment_window_expires_at") @db.Timestamptz(6)
+
+  session       TableSession   @relation(fields: [sessionId], references: [id])
+  items         RoundItem[]
+  payments      Payment[]
+  kitchenTicket KitchenTicket?
+
+  @@index([sessionId, status], map: "ix_rounds_session_status")
+  @@map("rounds")
+}
+
+model RoundItem {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId       String          @map("round_id") @db.Uuid
+  menuItemId    String          @map("menu_item_id") @db.Uuid
+  participantId String          @map("participant_id") @db.Uuid // who ordered it
+  quantity      Int             @default(1)
+  unitPrice     Decimal         @map("unit_price") @db.Decimal(12, 2) // price snapshot at order time
+  lineTotal     Decimal         @map("line_total") @db.Decimal(12, 2)
+  status        RoundItemStatus @default(ACTIVE)
+  notes         String?
+
+  round       Round               @relation(fields: [roundId], references: [id])
+  menuItem    MenuItem            @relation(fields: [menuItemId], references: [id])
+  participant SessionParticipant  @relation(fields: [participantId], references: [id])
+  modifiers   RoundItemModifier[]
+  ticketLines KitchenTicketLine[]
+  refunds     Refund[]
+
+  @@index([roundId], map: "ix_round_items_round")
+  @@map("round_items")
+}
+
+model RoundItemModifier {
+  roundItemId String  @map("round_item_id") @db.Uuid
+  modifierId  String  @map("modifier_id") @db.Uuid
+  priceDelta  Decimal @map("price_delta") @db.Decimal(12, 2) // snapshot
+
+  roundItem RoundItem @relation(fields: [roundItemId], references: [id])
+  modifier  Modifier  @relation(fields: [modifierId], references: [id])
+
+  @@id([roundItemId, modifierId])
+  @@map("round_item_modifiers")
+}
+
+// ---------------------------------------------------------------------------
+// Payments
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId       String        @map("round_id") @db.Uuid
+  participantId String?       @map("participant_id") @db.Uuid // payer; null for staff-recorded cash
+  method        PaymentMethod
+  amount        Decimal       @db.Decimal(12, 2)
+  status        PaymentStatus @default(INITIATED)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  confirmedAt   DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+
+  round            Round               @relation(fields: [roundId], references: [id])
+  participant      SessionParticipant? @relation(fields: [participantId], references: [id])
+  mpesaTransaction MpesaTransaction?
+  cardTransaction  CardTransaction?
+  etimsInvoices    EtimsInvoice[]
+  refunds          Refund[]
+
+  @@index([roundId, status], map: "ix_payments_round_status")
+  @@map("payments")
+}
+
+model MpesaTransaction {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId         String    @unique @map("payment_id") @db.Uuid
+  checkoutRequestId String    @unique @map("checkout_request_id") // from STK push
+  merchantRequestId String?   @map("merchant_request_id")
+  mpesaReceipt      String?   @unique @map("mpesa_receipt") // idempotency key once paid (unique allows many NULLs)
+  phone             String
+  amount            Decimal   @db.Decimal(12, 2)
+  resultCode        Int?      @map("result_code")
+  resultDesc        String?   @map("result_desc")
+  callbackAt        DateTime? @map("callback_at") @db.Timestamptz(6)
+  statusQueryCount  Int       @default(0) @map("status_query_count")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@map("mpesa_transactions")
+}
+
+model CardTransaction {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId  String  @unique @map("payment_id") @db.Uuid
+  gatewayRef String  @unique @map("gateway_ref")
+  authCode   String? @map("auth_code")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@map("card_transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Kitchen
+// ---------------------------------------------------------------------------
+
+model KitchenTicket {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId    String       @unique @map("round_id") @db.Uuid // one ticket per round
+  locationId String       @map("location_id") @db.Uuid
+  status     TicketStatus @default(QUEUED)
+  firedAt    DateTime     @default(now()) @map("fired_at") @db.Timestamptz(6)
+  servedAt   DateTime?    @map("served_at") @db.Timestamptz(6)
+
+  round    Round               @relation(fields: [roundId], references: [id])
+  location Location            @relation(fields: [locationId], references: [id])
+  lines    KitchenTicketLine[]
+
+  @@index([locationId, status], map: "ix_tickets_board")
+  @@map("kitchen_tickets")
+}
+
+model KitchenTicketLine {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId    String       @map("ticket_id") @db.Uuid
+  roundItemId String       @map("round_item_id") @db.Uuid
+  station     Station
+  status      TicketStatus @default(QUEUED)
+
+  ticket    KitchenTicket @relation(fields: [ticketId], references: [id])
+  roundItem RoundItem     @relation(fields: [roundItemId], references: [id])
+
+  @@map("kitchen_ticket_lines")
+}
+
+// ---------------------------------------------------------------------------
+// eTIMS
+// ---------------------------------------------------------------------------
+
+model EtimsInvoice {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId     String       @map("payment_id") @db.Uuid
+  locationId    String       @map("location_id") @db.Uuid
+  docType       EtimsDocType @default(INVOICE) @map("doc_type")
+  status        EtimsStatus  @default(PENDING)
+  sellerPin     String       @map("seller_pin")
+  buyerPin      String?      @map("buyer_pin") // when the diner claims input tax
+  totalAmount   Decimal      @map("total_amount") @db.Decimal(12, 2)
+  taxAmount     Decimal      @map("tax_amount") @db.Decimal(12, 2)
+  kraInvoiceNo  String?      @map("kra_invoice_no")
+  kraQrData     String?      @map("kra_qr_data")
+  transmittedAt DateTime?    @map("transmitted_at") @db.Timestamptz(6)
+  retryCount    Int          @default(0) @map("retry_count")
+  lastError     String?      @map("last_error")
+
+  payment              Payment            @relation(fields: [paymentId], references: [id])
+  location             Location           @relation(fields: [locationId], references: [id])
+  lines                EtimsInvoiceLine[]
+  creditNoteForRefunds Refund[]           @relation("RefundCreditNote")
+
+  // NOTE: "one INVOICE per payment" is a PARTIAL unique index (WHERE doc_type='INVOICE'),
+  // expressed in prisma/sql/partial-indexes.sql since Prisma cannot model partial indexes.
+  @@map("etims_invoices")
+}
+
+model EtimsInvoiceLine {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  description String
+  itemCode    String  @map("item_code")
+  quantity    Int
+  unitPrice   Decimal @map("unit_price") @db.Decimal(12, 2)
+  taxRate     Decimal @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount   Decimal @map("tax_amount") @db.Decimal(12, 2)
+
+  invoice EtimsInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("etims_invoice_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Refunds and store credit
+// ---------------------------------------------------------------------------
+
+model Refund {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId    String       @map("payment_id") @db.Uuid
+  roundItemId  String?      @map("round_item_id") @db.Uuid // null for whole-payment refund
+  amount       Decimal      @db.Decimal(12, 2)
+  reasonCode   String       @map("reason_code")
+  status       RefundStatus @default(REQUESTED)
+  requestedBy  String       @map("requested_by") @db.Uuid
+  approvedBy   String?      @map("approved_by") @db.Uuid
+  creditNoteId String?      @map("credit_note_id") @db.Uuid // the CREDIT_NOTE row
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt   DateTime?    @map("resolved_at") @db.Timestamptz(6)
+
+  payment          Payment       @relation(fields: [paymentId], references: [id])
+  roundItem        RoundItem?    @relation(fields: [roundItemId], references: [id])
+  requestedByStaff Staff         @relation("RefundRequestedBy", fields: [requestedBy], references: [id])
+  approvedByStaff  Staff?        @relation("RefundApprovedBy", fields: [approvedBy], references: [id])
+  creditNote       EtimsInvoice? @relation("RefundCreditNote", fields: [creditNoteId], references: [id])
+  storeCredits     StoreCredit[]
+
+  @@map("refunds")
+}
+
+model StoreCredit {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone          String // keyed to the diner's M-Pesa number
+  sourceRefundId String?  @map("source_refund_id") @db.Uuid
+  amount         Decimal  @db.Decimal(12, 2)
+  balance        Decimal  @db.Decimal(12, 2)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceRefund Refund? @relation(fields: [sourceRefundId], references: [id])
+
+  @@map("store_credits")
+}
+
+// ---------------------------------------------------------------------------
+// Controls and reconciliation
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement()) // append-only
+  locationId String   @map("location_id") @db.Uuid
+  staffId    String?  @map("staff_id") @db.Uuid
+  action     String // VOID, COMP, REFUND, PRICE_OVERRIDE, TOGGLE_86
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  location Location @relation(fields: [locationId], references: [id])
+  staff    Staff?   @relation(fields: [staffId], references: [id])
+
+  @@map("audit_log")
+}
+
+model CashDrawerSession {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId    String    @map("location_id") @db.Uuid
+  staffId       String    @map("staff_id") @db.Uuid
+  openedAt      DateTime  @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  openingFloat  Decimal   @map("opening_float") @db.Decimal(12, 2)
+  countedTotal  Decimal?  @map("counted_total") @db.Decimal(12, 2)
+  expectedTotal Decimal?  @map("expected_total") @db.Decimal(12, 2)
+  variance      Decimal?  @db.Decimal(12, 2)
+
+  location Location @relation(fields: [locationId], references: [id])
+  staff    Staff    @relation(fields: [staffId], references: [id])
+
+  @@map("cash_drawer_sessions")
+}
+
+model MpesaReconciliationRun {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  locationId     String   @map("location_id") @db.Uuid
+  runDate        DateTime @map("run_date") @db.Date
+  statementTotal Decimal  @map("statement_total") @db.Decimal(12, 2)
+  systemTotal    Decimal  @map("system_total") @db.Decimal(12, 2)
+  variance       Decimal  @db.Decimal(12, 2)
+  resolved       Boolean  @default(false)
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([locationId, runDate])
+  @@map("mpesa_reconciliation_runs")
+}

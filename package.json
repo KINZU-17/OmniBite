@@ -1,0 +1,18 @@
+{
+  "name": "omnibite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OmniBite — QR dine-in ordering and payment platform (Kenya). A product by Omnilab.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace @omnibite/shared",
+    "build": "npm run build:shared && npm run build --workspace @omnibite/api",
+    "dev:api": "npm run start:dev --workspace @omnibite/api",
+    "dev:web": "npm run dev --workspace @omnibite/web",
+    "dev:kds": "npm run dev --workspace @omnibite/kds",
+    "test": "npm run test --workspace @omnibite/api"
+  }
+}
