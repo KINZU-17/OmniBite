@@ -16,8 +16,87 @@ const TEST_URL =
   process.env.DATABASE_URL_TEST ||
   'postgresql://omnibite:omnibite@localhost:5432/omnibite_test';
 
+// If no external DB is available, try to start an embedded Postgres instance
+// (best-effort). This supports local dev where Docker is not installed.
+async function maybeStartEmbeddedPostgres() {
+  // Allow opting out of embedded Postgres with USE_EMBEDDED_POSTGRES=false
+  if (process.env.USE_EMBEDDED_POSTGRES === 'false') {
+    console.log('[e2e] USE_EMBEDDED_POSTGRES=false, skipping embedded start');
+    return null;
+  }
+  if (process.env.DATABASE_URL_ADMIN && process.env.DATABASE_URL_TEST) return null;
+  let embedded;
+  try {
+    // attempt to require the embedded-postgres package if present
+    // try several common export shapes to maximize compatibility
+    // eslint-disable-next-line global-require
+    const pkg = require('embedded-postgres');
+    if (!pkg) return null;
+
+    // Normalize to an instance with async start()/stop() if possible
+    if (typeof pkg === 'function') {
+      embedded = pkg({
+        port: 5432,
+        username: 'omnibite',
+        password: 'omnibite',
+        database: 'omnibite',
+      });
+    } else if (pkg.default && typeof pkg.default === 'function') {
+      embedded = pkg.default({ port: 5432, username: 'omnibite', password: 'omnibite', database: 'omnibite' });
+    } else if (pkg.EmbeddedPostgres) {
+      embedded = new pkg.EmbeddedPostgres({ port: 5432, username: 'omnibite', password: 'omnibite', database: 'omnibite' });
+    } else if (typeof pkg.start === 'function') {
+      embedded = pkg;
+    } else {
+      console.log('[e2e] embedded-postgres package present but API shape unrecognized');
+      return null;
+    }
+
+    // start the embedded server (best-effort using start or startSync)
+    if (typeof embedded.start === 'function') {
+      await embedded.start();
+    } else if (typeof embedded.run === 'function') {
+      await embedded.run();
+    } else if (typeof pkg.start === 'function') {
+      // pkg.start may return a handle
+      await pkg.start();
+    } else {
+      console.log('[e2e] embedded-postgres start method not found; skipping');
+      return null;
+    }
+
+    // If the instance exposes a port, use it; otherwise assume 5432
+    const port = (embedded && embedded.port) || 5432;
+    const admin = `postgresql://omnibite:omnibite@127.0.0.1:${port}/omnibite`;
+    const test = `postgresql://omnibite:omnibite@127.0.0.1:${port}/omnibite_test`;
+
+    // export these for subsequent steps
+    process.env.DATABASE_URL_ADMIN = process.env.DATABASE_URL_ADMIN || admin;
+    process.env.DATABASE_URL_TEST = process.env.DATABASE_URL_TEST || test;
+
+    // ensure it gets stopped when the process exits
+    process.on('exit', async () => {
+      try {
+        if (embedded && typeof embedded.stop === 'function') await embedded.stop();
+      } catch (e) {
+        /* noop */
+      }
+    });
+
+    console.log('[e2e] started embedded Postgres for tests at', test);
+    return embedded;
+  } catch (err) {
+    // No embedded package installed or startup failed; user will need Docker or remote DB
+    console.log('[e2e] embedded-postgres unavailable or failed to start:', String(err));
+    return null;
+  }
+}
+
 async function main() {
   const apiRoot = join(__dirname, '..');
+
+  // Attempt embedded Postgres when no external DB configured
+  await maybeStartEmbeddedPostgres();
 
   // 1. Create the test database (no IF NOT EXISTS for CREATE DATABASE).
   const admin = new PrismaClient({ datasources: { db: { url: ADMIN_URL } } });

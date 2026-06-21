@@ -1,5 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'node:crypto';
 import type { StaffRole } from '@prisma/client';
@@ -10,15 +10,15 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * Boot the full Nest app in-process against the test database. Mirrors main.ts's
  * global ValidationPipe so DTO validation behaves identically, and stops the
  * @Cron workers so tests are deterministic — the reapers are invoked directly
- * where a spec needs them.
+ * where a spec needs them. `customize` lets a spec override providers (e.g. mock
+ * an external gateway client).
  */
-export async function bootstrap(): Promise<{
-  app: INestApplication;
-  prisma: PrismaService;
-}> {
-  const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+export async function bootstrap(
+  customize?: (builder: TestingModuleBuilder) => TestingModuleBuilder,
+): Promise<{ app: INestApplication; prisma: PrismaService }> {
+  let builder = Test.createTestingModule({ imports: [AppModule] });
+  if (customize) builder = customize(builder);
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

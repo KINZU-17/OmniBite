@@ -402,10 +402,15 @@ model MpesaTransaction {
 }
 
 model CardTransaction {
-  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paymentId  String  @unique @map("payment_id") @db.Uuid
-  gatewayRef String  @unique @map("gateway_ref")
-  authCode   String? @map("auth_code")
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId        String    @unique @map("payment_id") @db.Uuid
+  gatewayRef       String    @unique @map("gateway_ref") // Pesapal order_tracking_id (idempotency key)
+  authCode         String?   @map("auth_code")
+  redirectUrl      String?   @map("redirect_url") // hosted-checkout URL the diner is sent to
+  status           String? // last known gateway status (e.g. COMPLETED / FAILED)
+  resultDesc       String?   @map("result_desc")
+  ipnAt            DateTime? @map("ipn_at") @db.Timestamptz(6)
+  statusQueryCount Int       @default(0) @map("status_query_count")
 
   payment Payment @relation(fields: [paymentId], references: [id])
 

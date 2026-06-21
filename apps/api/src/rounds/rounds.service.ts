@@ -118,8 +118,8 @@ export class RoundsService {
     ]);
     this.realtime.emitTableState(session.locationId, session.tableId, TableFloorState.ORDERED);
 
-    const payments = await this.payments.createForRound(roundId, dto);
-    return { roundId, status: RoundStatus.AWAITING_PAYMENT, payments };
+    const { payments, cardRedirects } = await this.payments.createForRound(roundId, dto);
+    return { roundId, status: RoundStatus.AWAITING_PAYMENT, payments, cardRedirects };
   }
 
   async cancel(roundId: string) {
