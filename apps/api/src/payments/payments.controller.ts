@@ -14,7 +14,7 @@ export class PaymentsController {
     return this.payments.confirmCash(id);
   }
 
-  /** Card captured via the gateway. */
+  /** Manual card capture on a physical terminal (online card uses Pesapal). */
   @Post(':id/card')
   @UseGuards(StaffGuard)
   card(@Param('id') id: string, @Body() dto: ConfirmCardDto) {

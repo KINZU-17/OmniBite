@@ -60,6 +60,12 @@ export class EtimsService {
     if (!invoice) throw new NotFoundException('invoice not found');
     if (invoice.status === EtimsStatus.TRANSMITTED) return;
 
+    // Until eTIMS is wired up, leave the invoice/credit note PENDING rather than
+    // marking it FAILED on every sale and refund; the retry worker (which also
+    // no-ops while unconfigured) transmits everything once ETIMS_BASE_URL is set.
+    // Keeps FAILED meaningful — a real transmission failure, not "not wired up".
+    if (!this.client.configured) return;
+
     let originalInvoiceNo: string | null = null;
     if (invoice.docType === EtimsDocType.CREDIT_NOTE) {
       const original = await this.prisma.etimsInvoice.findFirst({

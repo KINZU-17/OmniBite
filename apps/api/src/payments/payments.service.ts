@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { SettlementService } from '../gate/settlement.service';
 import { MpesaService } from '../mpesa/mpesa.service';
+import { PesapalService } from '../pesapal/pesapal.service';
 import { money, sum, ZERO } from '../common/money';
 import { ConfirmCardDto, SubmitRoundDto } from './dto';
 
@@ -24,18 +25,20 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly settlement: SettlementService,
     private readonly mpesa: MpesaService,
+    private readonly pesapal: PesapalService,
     private readonly config: ConfigService,
   ) {}
 
   /**
    * SUBMITTED -> AWAITING_PAYMENT. Creates one payment request per payer with
    * server-computed amounts (client never sets the amount), then fires the STK
-   * pushes for M-Pesa payers. Cash and card stay INITIATED until recorded.
+   * pushes for M-Pesa payers and opens Pesapal hosted-checkout orders for card
+   * payers (returning their redirect URLs). Cash stays INITIATED until recorded.
    */
   async createForRound(roundId: string, dto: SubmitRoundDto) {
     const windowSec = this.config.get<number>('PAYMENT_WINDOW_SECONDS', 300);
 
-    const { payments, mpesaToInitiate, tableNumber } = await this.prisma.$transaction(
+    const { payments, mpesaToInitiate, cardToInitiate, tableNumber } = await this.prisma.$transaction(
       async (tx) => {
         const round = await tx.round.findUnique({
           where: { id: roundId },
@@ -63,6 +66,7 @@ export class PaymentsService {
         const grandTotal = sum(round.items.map((i) => i.lineTotal));
 
         const toInitiate: Array<{ payment: Payment; phone: string }> = [];
+        const cardToInit: Array<{ payment: Payment; phone?: string }> = [];
         const created: Payment[] = [];
 
         if (dto.settlementMode === SettlementMode.SINGLE_PAYER) {
@@ -83,6 +87,11 @@ export class PaymentsService {
           if (inst.method === PaymentMethod.MPESA) {
             const phone = this.resolvePhone(inst.phone, inst.participantId, round.session.participants);
             toInitiate.push({ payment, phone });
+          } else if (inst.method === PaymentMethod.CARD) {
+            cardToInit.push({
+              payment,
+              phone: this.optionalPhone(inst.phone, inst.participantId, round.session.participants),
+            });
           }
         } else {
           // SPLIT: every participant with items must have a payment instruction.
@@ -99,6 +108,11 @@ export class PaymentsService {
             if (inst.method === PaymentMethod.MPESA) {
               const phone = this.resolvePhone(inst.phone, participantId, round.session.participants);
               toInitiate.push({ payment, phone });
+            } else if (inst.method === PaymentMethod.CARD) {
+              cardToInit.push({
+                payment,
+                phone: this.optionalPhone(inst.phone, participantId, round.session.participants),
+              });
             }
           }
         }
@@ -117,6 +131,7 @@ export class PaymentsService {
         return {
           payments: created,
           mpesaToInitiate: toInitiate,
+          cardToInitiate: cardToInit,
           tableNumber: round.session.table.tableNumber,
         };
       },
@@ -126,7 +141,13 @@ export class PaymentsService {
     for (const { payment, phone } of mpesaToInitiate) {
       await this.mpesa.initiate(payment, phone, tableNumber);
     }
-    return payments;
+    // Open Pesapal hosted-checkout orders for card payers; collect their redirects.
+    const cardRedirects: Array<{ paymentId: string; redirectUrl: string }> = [];
+    for (const { payment, phone } of cardToInitiate) {
+      const { redirectUrl } = await this.pesapal.initiate(payment, { phone });
+      if (redirectUrl) cardRedirects.push({ paymentId: payment.id, redirectUrl });
+    }
+    return { payments, cardRedirects };
   }
 
   /** Cash recorded by staff -> CONFIRMED, may fire the round. */
@@ -136,7 +157,12 @@ export class PaymentsService {
     return this.settlement.confirmPayment(paymentId);
   }
 
-  /** Card captured (gateway integration is a Phase 1 stub) -> CONFIRMED. */
+  /**
+   * Manual card capture -> CONFIRMED. The online card path is Pesapal hosted
+   * checkout (diner-driven, IPN-confirmed via PesapalService); this is the
+   * staff-operated fallback for a physical card terminal, where the reader
+   * captures the charge and staff record its gateway ref + auth code by hand.
+   */
   async confirmCard(paymentId: string, dto: ConfirmCardDto): Promise<{ fired: boolean }> {
     const payment = await this.requirePayment(paymentId, PaymentMethod.CARD);
     if (payment.status === 'CONFIRMED') return { fired: false };
@@ -186,6 +212,15 @@ export class PaymentsService {
     const phone = explicit ?? participants.find((p) => p.id === participantId)?.phone;
     if (!phone) throw new BadRequestException('no phone number for M-Pesa payment');
     return phone;
+  }
+
+  /** Like resolvePhone but optional — card billing can proceed without a phone. */
+  private optionalPhone(
+    explicit: string | undefined,
+    participantId: string | null | undefined,
+    participants: { id: string; phone: string | null }[],
+  ): string | undefined {
+    return explicit ?? participants.find((p) => p.id === participantId)?.phone ?? undefined;
   }
 
   private async requirePayment(id: string, method: PaymentMethod): Promise<Payment> {
