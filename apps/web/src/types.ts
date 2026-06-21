@@ -10,6 +10,7 @@ export interface MenuItem {
   description?: string | null;
   basePrice: string;
   category?: string | null;
+  photoUrl?: string | null;
   is86: boolean;
   allergens: { allergen: string }[];
   modifierGroups: { modifierGroup: { id: string; name: string; modifiers: Modifier[] } }[];
@@ -19,7 +20,7 @@ export interface RoundItem {
   quantity: number;
   lineTotal: string;
   status: string;
-  menuItem: { name: string };
+  menuItem: { name: string; photoUrl?: string | null; category?: string | null };
 }
 export interface Payment {
   id: string;

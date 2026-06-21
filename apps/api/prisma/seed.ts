@@ -87,12 +87,14 @@ async function main() {
     },
   });
 
-  const items: Array<{ name: string; category: string; price: number; code: string; allergens: string[] }> = [
-    { name: 'Beef Burger', category: 'Grill', price: 850, code: 'KE-FOOD-0001', allergens: ['gluten', 'dairy'] },
-    { name: 'Grilled Chicken', category: 'Grill', price: 950, code: 'KE-FOOD-0002', allergens: [] },
-    { name: 'Fries', category: 'Fry', price: 350, code: 'KE-FOOD-0003', allergens: [] },
-    { name: 'Garden Salad', category: 'Cold', price: 600, code: 'KE-FOOD-0004', allergens: [] },
-    { name: 'Soda', category: 'Cold', price: 200, code: 'KE-DRINK-0001', allergens: [] },
+  // photo: spec says "Items carry photos…"; these dev URLs are keyword-matched
+  // stock photos so the seeded menu shows real food images out of the box.
+  const items: Array<{ name: string; category: string; price: number; code: string; allergens: string[]; photo: string }> = [
+    { name: 'Beef Burger', category: 'Grill', price: 850, code: 'KE-FOOD-0001', allergens: ['gluten', 'dairy'], photo: 'https://loremflickr.com/600/400/burger?lock=11' },
+    { name: 'Grilled Chicken', category: 'Grill', price: 950, code: 'KE-FOOD-0002', allergens: [], photo: 'https://loremflickr.com/600/400/chicken?lock=22' },
+    { name: 'Fries', category: 'Fry', price: 350, code: 'KE-FOOD-0003', allergens: [], photo: 'https://loremflickr.com/600/400/fries?lock=33' },
+    { name: 'Garden Salad', category: 'Cold', price: 600, code: 'KE-FOOD-0004', allergens: [], photo: 'https://loremflickr.com/600/400/salad?lock=44' },
+    { name: 'Soda', category: 'Cold', price: 200, code: 'KE-DRINK-0001', allergens: [], photo: 'https://loremflickr.com/600/400/drink?lock=55' },
   ];
 
   for (const it of items) {
@@ -103,6 +105,7 @@ async function main() {
         category: it.category,
         basePrice: it.price,
         itemCode: it.code,
+        photoUrl: it.photo,
         description: `${it.name} — freshly prepared`,
         allergens: { create: it.allergens.map((a) => ({ allergen: a })) },
       },

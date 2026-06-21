@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Events } from '@omnibite/shared';
@@ -8,6 +8,39 @@ import { loadCtx, saveCardReturn, saveCtx } from '../lib/storage';
 import type { MenuItem, PaymentMethod, Round, Session, SubmitResult } from '../types';
 
 const kes = (v: string | number) => `KES ${Number(v).toLocaleString('en-KE')}`;
+
+// Spec: "Items carry photos, descriptions, price, and dietary and allergen tags."
+// We render menu_items.photo_url; when an item has none yet, fall back to a food
+// photo matched to its name/category so the menu never shows an empty tile.
+const PHOTO_KEYWORDS: Array<[RegExp, string]> = [
+  [/burger/, 'burger'],
+  [/chicken/, 'chicken'],
+  [/fries|chips/, 'fries'],
+  [/salad/, 'salad'],
+  [/soda|cola|juice|drink|water/, 'drink'],
+  [/pizza/, 'pizza'],
+  [/coffee|tea|latte/, 'coffee'],
+  [/rice|pilau|biryani/, 'rice'],
+  [/fish/, 'fish'],
+];
+function photoFor(item: { name: string; category?: string | null; photoUrl?: string | null }): string {
+  if (item.photoUrl) return item.photoUrl;
+  const hay = `${item.name} ${item.category ?? ''}`.toLowerCase();
+  const query = PHOTO_KEYWORDS.find(([re]) => re.test(hay))?.[1] ?? (item.category ?? 'food').toLowerCase().split(/\s+/)[0];
+  // Lock the image to the item name so it stays stable across reloads.
+  const lock = Math.abs([...item.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 1000;
+  return `https://loremflickr.com/600/400/${encodeURIComponent(query)}?lock=${lock}`;
+}
+
+// Neutral tile shown if even the fallback photo fails to load (offline, blocked).
+const PHOTO_PLACEHOLDER =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="100%" height="100%" fill="#ccfbf1"/><text x="50%" y="50%" font-family="sans-serif" font-size="32" fill="#0f766e" text-anchor="middle" dominant-baseline="middle">OmniBite</text></svg>',
+  );
+const onPhotoError = (e: SyntheticEvent<HTMLImageElement>) => {
+  if (e.currentTarget.src !== PHOTO_PLACEHOLDER) e.currentTarget.src = PHOTO_PLACEHOLDER;
+};
 
 const TRACK_LABEL: Record<string, string> = {
   AWAITING_PAYMENT: 'Waiting for payment',
@@ -212,7 +245,22 @@ function MenuCard({ item, onAdd, disabled }: { item: MenuItem; onAdd: (i: MenuIt
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   return (
-    <div className={`rounded-xl border bg-white p-4 shadow-sm ${item.is86 ? 'opacity-40' : ''}`}>
+    <div className={`overflow-hidden rounded-xl border bg-white shadow-sm ${item.is86 ? 'opacity-40' : ''}`}>
+      <div className="relative">
+        <img
+          src={photoFor(item)}
+          alt={item.name}
+          loading="lazy"
+          onError={onPhotoError}
+          className="h-40 w-full object-cover"
+        />
+        {item.is86 && (
+          <span className="absolute right-2 top-2 rounded bg-black/70 px-2 py-0.5 text-xs font-semibold text-white">
+            Out of stock
+          </span>
+        )}
+      </div>
+      <div className="p-4">
       <div className="flex justify-between">
         <div>
           <h3 className="font-semibold">{item.name}</h3>
@@ -246,6 +294,7 @@ function MenuCard({ item, onAdd, disabled }: { item: MenuItem; onAdd: (i: MenuIt
       >
         {item.is86 ? 'Out of stock' : 'Add to order'}
       </button>
+      </div>
     </div>
   );
 }
@@ -274,8 +323,14 @@ function CartBar({
     <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md border-t bg-white p-4 shadow-2xl">
       <div className="mb-2 max-h-28 space-y-1 overflow-auto">
         {round.items.map((i) => (
-          <div key={i.id} className="flex justify-between text-sm">
-            <span>
+          <div key={i.id} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <img
+                src={photoFor(i.menuItem)}
+                alt=""
+                onError={onPhotoError}
+                className="h-9 w-9 rounded-md object-cover"
+              />
               {i.quantity}× {i.menuItem.name}
             </span>
             <span className="flex items-center gap-2">
