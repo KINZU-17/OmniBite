@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'phase1-hardening', '**' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: omnibite
+          POSTGRES_PASSWORD: omnibite
+          POSTGRES_DB: omnibite
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval=10s --health-timeout=5s --health-retries=5
+      redis:
+        image: redis:6
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared
+        run: npm run build:shared
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://omnibite:omnibite@127.0.0.1:5432/omnibite
+        run: npm run prisma:generate --workspace @omnibite/api
+
+      - name: Run unit tests
+        run: npm run test --workspace @omnibite/api
+
+      - name: Run e2e tests
+        env:
+          DATABASE_URL_ADMIN: postgresql://omnibite:omnibite@127.0.0.1:5432/postgres
+          DATABASE_URL_TEST: postgresql://omnibite:omnibite@127.0.0.1:5432/omnibite_test
+          DATABASE_URL: postgresql://omnibite:omnibite@127.0.0.1:5432/omnibite?schema=public
+          REDIS_URL: redis://127.0.0.1:6379
+        run: npm run test:e2e --workspace @omnibite/api
