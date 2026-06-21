@@ -41,3 +41,19 @@ export interface Session {
   participants: { id: string; displayName?: string | null }[];
   rounds: Round[];
 }
+
+export type PaymentMethod = 'MPESA' | 'CARD';
+
+/** A card payer's Pesapal hosted-checkout URL, keyed to their payment. */
+export interface CardRedirect {
+  paymentId: string;
+  redirectUrl: string;
+}
+
+/** Response of POST /rounds/:id/submit. */
+export interface SubmitResult {
+  roundId: string;
+  status: string;
+  payments: Payment[];
+  cardRedirects: CardRedirect[];
+}

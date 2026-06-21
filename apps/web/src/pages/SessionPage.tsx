@@ -4,8 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Events } from '@omnibite/shared';
 import { api } from '../lib/api';
 import { connectGuest } from '../lib/socket';
-import { loadCtx, saveCtx } from '../lib/storage';
-import type { MenuItem, Round, Session } from '../types';
+import { loadCtx, saveCardReturn, saveCtx } from '../lib/storage';
+import type { MenuItem, PaymentMethod, Round, Session, SubmitResult } from '../types';
 
 const kes = (v: string | number) => `KES ${Number(v).toLocaleString('en-KE')}`;
 
@@ -27,6 +27,7 @@ export function SessionPage() {
   const queryClient = useQueryClient();
   const [ctx, setCtx] = useState(() => (sessionId ? loadCtx(sessionId) : null));
   const [phone, setPhone] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('MPESA');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -101,20 +102,29 @@ export function SessionPage() {
   }
 
   async function submit() {
-    if (!buildingRound || !ctx) return;
-    if (!phone) {
+    if (!buildingRound || !ctx || !sessionId) return;
+    if (method === 'MPESA' && !phone) {
       setError('Enter your M-Pesa phone number to pay.');
       return;
     }
-    await run(() =>
-      api(`/rounds/${buildingRound.id}/submit`, {
+    await run(async () => {
+      const res = await api<SubmitResult>(`/rounds/${buildingRound.id}/submit`, {
         method: 'POST',
         body: JSON.stringify({
           settlementMode: 'SINGLE_PAYER',
-          payments: [{ participantId: ctx.participantId, method: 'MPESA', phone }],
+          payments: [{ participantId: ctx.participantId, method, phone: phone || undefined }],
         }),
-      }).then(() => undefined),
-    );
+      });
+      if (method === 'CARD') {
+        const redirect = res.cardRedirects?.[0]?.redirectUrl;
+        if (!redirect) {
+          throw new Error('Could not open card checkout. Please try again or pay with M-Pesa.');
+        }
+        // Leave the app for Pesapal's hosted checkout; come back via /card/return.
+        saveCardReturn(sessionId);
+        window.location.assign(redirect);
+      }
+    });
   }
 
   async function retry(paymentId: string) {
@@ -152,6 +162,8 @@ export function SessionPage() {
           round={buildingRound}
           phone={phone}
           setPhone={setPhone}
+          method={method}
+          setMethod={setMethod}
           onRemove={removeItem}
           onSubmit={submit}
           busy={busy}
@@ -242,6 +254,8 @@ function CartBar({
   round,
   phone,
   setPhone,
+  method,
+  setMethod,
   onRemove,
   onSubmit,
   busy,
@@ -249,6 +263,8 @@ function CartBar({
   round: Round;
   phone: string;
   setPhone: (v: string) => void;
+  method: PaymentMethod;
+  setMethod: (m: PaymentMethod) => void;
   onRemove: (id: string) => void;
   onSubmit: () => void;
   busy: boolean;
@@ -271,19 +287,45 @@ function CartBar({
           </div>
         ))}
       </div>
-      <input
-        className="mb-2 w-full rounded-lg border border-slate-300 p-2 text-sm"
-        placeholder="M-Pesa phone e.g. 2547…"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-      />
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        {(['MPESA', 'CARD'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMethod(m)}
+            className={`rounded-lg border p-2 text-sm font-semibold ${
+              method === m
+                ? 'border-teal-600 bg-teal-50 text-teal-700'
+                : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            {m === 'MPESA' ? 'M-Pesa' : 'Card'}
+          </button>
+        ))}
+      </div>
+
+      {method === 'MPESA' && (
+        <input
+          className="mb-2 w-full rounded-lg border border-slate-300 p-2 text-sm"
+          placeholder="M-Pesa phone e.g. 2547…"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+        />
+      )}
+
       <button
         className="w-full rounded-lg bg-teal-600 p-3 font-semibold text-white disabled:opacity-50"
         disabled={busy}
         onClick={onSubmit}
       >
-        Pay {kes(total)} with M-Pesa
+        {method === 'MPESA' ? `Pay ${kes(total)} with M-Pesa` : `Pay ${kes(total)} by card`}
       </button>
+      {method === 'CARD' && (
+        <p className="mt-1 text-center text-xs text-slate-400">
+          You'll be taken to a secure card page, then back here.
+        </p>
+      )}
     </div>
   );
 }
@@ -301,18 +343,26 @@ function Tracking({
 }) {
   const ticketStatus = round.kitchenTicket?.status;
   const label = ticketStatus ? TICKET_LABEL[ticketStatus] : TRACK_LABEL[round.status] ?? round.status;
-  const failed = round.payments.filter((p) => p.status === 'FAILED');
-  const pending = round.payments.some((p) => ['INITIATED', 'PENDING'].includes(p.status));
+  // Retry is the M-Pesa STK path only; a failed card payment is re-paid by ordering again.
+  const failedMpesa = round.payments.filter((p) => p.status === 'FAILED' && p.method === 'MPESA');
+  const failedCard = round.payments.some((p) => p.status === 'FAILED' && p.method === 'CARD');
+  const pendingMpesa = round.payments.some(
+    (p) => p.method === 'MPESA' && ['INITIATED', 'PENDING'].includes(p.status),
+  );
+  const pendingCard = round.payments.some((p) => p.method === 'CARD' && p.status === 'PENDING');
 
   return (
     <section className="mb-4 rounded-xl border border-teal-200 bg-teal-50 p-4">
       <p className="text-sm font-medium text-teal-800">Your order</p>
       <p className="mt-1 text-lg font-bold text-teal-900">{label}</p>
-      {pending && <p className="mt-1 text-sm text-teal-700">Check your phone for the M-Pesa PIN prompt…</p>}
-      {failed.length > 0 && (
+      {pendingMpesa && (
+        <p className="mt-1 text-sm text-teal-700">Check your phone for the M-Pesa PIN prompt…</p>
+      )}
+      {pendingCard && <p className="mt-1 text-sm text-teal-700">Confirming your card payment…</p>}
+      {failedMpesa.length > 0 && (
         <div className="mt-2">
           <p className="text-sm text-red-600">Payment failed.</p>
-          {failed.map((p) => (
+          {failedMpesa.map((p) => (
             <button
               key={p.id}
               disabled={busy || !phone}
@@ -323,6 +373,11 @@ function Tracking({
             </button>
           ))}
         </div>
+      )}
+      {failedCard && (
+        <p className="mt-2 text-sm text-red-600">
+          Card payment didn't go through. Add your items again to retry.
+        </p>
       )}
     </section>
   );

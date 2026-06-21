@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import { ScanPage } from './pages/ScanPage';
 import { SessionPage } from './pages/SessionPage';
+import { CardReturnPage } from './pages/CardReturnPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -29,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/t/:qrToken" element={<ScanPage />} />
           <Route path="/session/:sessionId" element={<SessionPage />} />
+          <Route path="/card/return" element={<CardReturnPage />} />
           <Route path="*" element={<Landing />} />
         </Routes>
       </BrowserRouter>
