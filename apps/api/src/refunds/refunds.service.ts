@@ -4,12 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  Prisma,
-  RefundStatus,
-  RoundItemStatus,
-  Staff,
-} from '@prisma/client';
+import { Prisma, RefundStatus, RoundItemStatus, Staff } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { EtimsService } from '../etims/etims.service';
@@ -35,7 +30,9 @@ export class RefundsService {
   ) {}
 
   async request(dto: RequestRefundDto, staff: Staff) {
-    const payment = await this.prisma.payment.findUnique({ where: { id: dto.paymentId } });
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: dto.paymentId },
+    });
     if (!payment) throw new NotFoundException('payment not found');
     if (payment.status !== 'CONFIRMED') {
       throw new BadRequestException('can only refund a confirmed payment');
@@ -43,7 +40,9 @@ export class RefundsService {
 
     let amount = dto.amount ? money(dto.amount) : payment.amount;
     if (dto.roundItemId && !dto.amount) {
-      const item = await this.prisma.roundItem.findUnique({ where: { id: dto.roundItemId } });
+      const item = await this.prisma.roundItem.findUnique({
+        where: { id: dto.roundItemId },
+      });
       if (!item) throw new NotFoundException('round item not found');
       amount = item.lineTotal;
     }
@@ -95,7 +94,10 @@ export class RefundsService {
       throw new BadRequestException('refund must be APPROVED before resolving');
     }
 
-    const ctx = await this.buildCreditContext(refund.paymentId, refund.roundItemId);
+    const ctx = await this.buildCreditContext(
+      refund.paymentId,
+      refund.roundItemId,
+    );
 
     const { creditNoteId } = await this.prisma.$transaction(async (tx) => {
       const creditNoteId = await this.etims.createCreditNote(tx, {
@@ -119,7 +121,11 @@ export class RefundsService {
         }
         await tx.refund.update({
           where: { id: refundId },
-          data: { status: RefundStatus.RESOLVED_CREDIT, creditNoteId, resolvedAt: new Date() },
+          data: {
+            status: RefundStatus.RESOLVED_CREDIT,
+            creditNoteId,
+            resolvedAt: new Date(),
+          },
         });
       } else {
         await tx.refund.update({
@@ -147,10 +153,15 @@ export class RefundsService {
     });
 
     // Transmit the credit note (async; never blocks) and fire the reversal if asked.
-    await this.etims.transmit(creditNoteId).catch((e) =>
-      this.logger.warn(`credit note ${creditNoteId} transmit deferred: ${String(e)}`),
-    );
-    if (dto.mode === 'REVERSAL') await this.initiateReversal(refund.paymentId, refund.amount);
+    await this.etims
+      .transmit(creditNoteId)
+      .catch((e) =>
+        this.logger.warn(
+          `credit note ${creditNoteId} transmit deferred: ${String(e)}`,
+        ),
+      );
+    if (dto.mode === 'REVERSAL')
+      await this.initiateReversal(refund.paymentId, refund.amount);
 
     return this.prisma.refund.findUnique({ where: { id: refundId } });
   }
@@ -159,7 +170,10 @@ export class RefundsService {
    * Spec edge: an item 86'd after payment but before service is auto-refunded as
    * store credit. Attributed to a manager/admin at the location as the actor.
    */
-  async autoRefundItem(roundItemId: string, reasonCode = 'ITEM_86_AFTER_PAID'): Promise<void> {
+  async autoRefundItem(
+    roundItemId: string,
+    reasonCode = 'ITEM_86_AFTER_PAID',
+  ): Promise<void> {
     const item = await this.prisma.roundItem.findUnique({
       where: { id: roundItemId },
       include: { round: { include: { payments: true, session: true } } },
@@ -167,15 +181,23 @@ export class RefundsService {
     if (!item || item.status !== RoundItemStatus.ACTIVE) return;
 
     const payment =
-      item.round.payments.find((p) => p.status === 'CONFIRMED' && p.participantId === item.participantId) ??
-      item.round.payments.find((p) => p.status === 'CONFIRMED');
+      item.round.payments.find(
+        (p) =>
+          p.status === 'CONFIRMED' && p.participantId === item.participantId,
+      ) ?? item.round.payments.find((p) => p.status === 'CONFIRMED');
     if (!payment) return;
 
     const actor = await this.prisma.staff.findFirst({
-      where: { locationId: item.round.session.locationId, role: { in: ['MANAGER', 'ADMIN'] }, active: true },
+      where: {
+        locationId: item.round.session.locationId,
+        role: { in: ['MANAGER', 'ADMIN'] },
+        active: true,
+      },
     });
     if (!actor) {
-      this.logger.warn(`no manager/admin to attribute auto-refund for item ${roundItemId}`);
+      this.logger.warn(
+        `no manager/admin to attribute auto-refund for item ${roundItemId}`,
+      );
       return;
     }
 
@@ -189,10 +211,17 @@ export class RefundsService {
 
   // --- helpers ---------------------------------------------------------------
 
-  private async initiateReversal(paymentId: string, amount: Prisma.Decimal): Promise<void> {
-    const txn = await this.prisma.mpesaTransaction.findUnique({ where: { paymentId } });
+  private async initiateReversal(
+    paymentId: string,
+    amount: Prisma.Decimal,
+  ): Promise<void> {
+    const txn = await this.prisma.mpesaTransaction.findUnique({
+      where: { paymentId },
+    });
     if (!txn?.mpesaReceipt) {
-      this.logger.warn(`no M-Pesa receipt for payment ${paymentId}; reversal not sent`);
+      this.logger.warn(
+        `no M-Pesa receipt for payment ${paymentId}; reversal not sent`,
+      );
       return;
     }
     try {
@@ -202,11 +231,16 @@ export class RefundsService {
         receiver: txn.phone,
       });
     } catch (err) {
-      this.logger.error(`reversal request failed for ${paymentId}: ${String(err)}`);
+      this.logger.error(
+        `reversal request failed for ${paymentId}: ${String(err)}`,
+      );
     }
   }
 
-  private async buildCreditContext(paymentId: string, roundItemId: string | null) {
+  private async buildCreditContext(
+    paymentId: string,
+    roundItemId: string | null,
+  ) {
     const payment = await this.prisma.payment.findUniqueOrThrow({
       where: { id: paymentId },
       include: {
@@ -225,11 +259,15 @@ export class RefundsService {
     const items = roundItemId
       ? payment.round.items.filter((i) => i.id === roundItemId)
       : payment.round.settlementMode === 'SPLIT'
-        ? payment.round.items.filter((i) => i.participantId === payment.participantId)
+        ? payment.round.items.filter(
+            (i) => i.participantId === payment.participantId,
+          )
         : payment.round.items;
 
     const participant = payment.participantId
-      ? await this.prisma.sessionParticipant.findUnique({ where: { id: payment.participantId } })
+      ? await this.prisma.sessionParticipant.findUnique({
+          where: { id: payment.participantId },
+        })
       : null;
 
     return {
@@ -253,7 +291,10 @@ export class RefundsService {
     return refund;
   }
 
-  private async locationOf(roundId: string, isPaymentId = false): Promise<string> {
+  private async locationOf(
+    roundId: string,
+    isPaymentId = false,
+  ): Promise<string> {
     if (isPaymentId) {
       const p = await this.prisma.payment.findUniqueOrThrow({
         where: { id: roundId },

@@ -16,7 +16,10 @@ export function money(value: Prisma.Decimal.Value): Money {
 export const ZERO: Money = new Decimal(0);
 
 export function sum(values: Prisma.Decimal.Value[]): Money {
-  return values.reduce<Money>((acc, v) => acc.add(new Decimal(v)), new Decimal(0));
+  return values.reduce<Money>(
+    (acc, v) => acc.add(new Decimal(v)),
+    new Decimal(0),
+  );
 }
 
 /** Round half-up to 2 decimal places. */

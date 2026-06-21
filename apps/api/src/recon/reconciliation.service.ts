@@ -21,7 +21,9 @@ export class ReconciliationService {
   async nightly(): Promise<void> {
     const yesterday = new Date();
     yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-    const locations = await this.prisma.location.findMany({ select: { id: true } });
+    const locations = await this.prisma.location.findMany({
+      select: { id: true },
+    });
     for (const loc of locations) {
       await this.runForLocation(loc.id, yesterday).catch((e) =>
         this.logger.error(`reconciliation failed for ${loc.id}: ${String(e)}`),

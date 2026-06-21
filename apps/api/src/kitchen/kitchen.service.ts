@@ -23,7 +23,9 @@ export class KitchenService {
   getBoard(locationId: string) {
     return this.prisma.kitchenTicket.findMany({
       where: { locationId, status: { in: ['QUEUED', 'IN_PREP', 'READY'] } },
-      include: { lines: { include: { roundItem: { include: { menuItem: true } } } } },
+      include: {
+        lines: { include: { roundItem: { include: { menuItem: true } } } },
+      },
       orderBy: { firedAt: 'asc' },
     });
   }
@@ -55,7 +57,9 @@ export class KitchenService {
     if (status !== TicketStatus.IN_PREP && status !== TicketStatus.READY) {
       throw new BadRequestException('use the serve endpoint to mark SERVED');
     }
-    const ticket = await this.prisma.kitchenTicket.findUnique({ where: { id: ticketId } });
+    const ticket = await this.prisma.kitchenTicket.findUnique({
+      where: { id: ticketId },
+    });
     if (!ticket) throw new NotFoundException('ticket not found');
 
     const updated = await this.prisma.kitchenTicket.update({

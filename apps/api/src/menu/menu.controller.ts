@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Patch,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import type { Staff } from '@prisma/client';
 import { MenuService } from './menu.service';
 import { Toggle86Dto } from './dto';

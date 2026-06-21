@@ -70,14 +70,17 @@ export class SettlementService {
       where: { id: paymentId, status: { notIn: ['CONFIRMED', 'FAILED'] } },
       data: { status: 'FAILED' },
     });
-    if (resultDesc) this.logger.debug(`payment ${paymentId} failed: ${resultDesc}`);
+    if (resultDesc)
+      this.logger.debug(`payment ${paymentId} failed: ${resultDesc}`);
   }
 
   /**
    * Split-mode payment window expiry: drop the items of any participant who never
    * paid, then fire the remainder. If nothing payable remains, cancel the round.
    */
-  async dropUnpaidAndSettle(roundId: string): Promise<{ fired: boolean; cancelled: boolean }> {
+  async dropUnpaidAndSettle(
+    roundId: string,
+  ): Promise<{ fired: boolean; cancelled: boolean }> {
     const result = await this.prisma.$transaction(async (tx) => {
       const round = await tx.round.findUnique({
         where: { id: roundId },
@@ -88,10 +91,16 @@ export class SettlementService {
       }
 
       const confirmedParticipantIds = new Set(
-        round.payments.filter((p) => p.status === 'CONFIRMED').map((p) => p.participantId),
+        round.payments
+          .filter((p) => p.status === 'CONFIRMED')
+          .map((p) => p.participantId),
       );
-      const activeItems = round.items.filter((i) => i.status === RoundItemStatus.ACTIVE);
-      const unpaid = activeItems.filter((i) => !confirmedParticipantIds.has(i.participantId));
+      const activeItems = round.items.filter(
+        (i) => i.status === RoundItemStatus.ACTIVE,
+      );
+      const unpaid = activeItems.filter(
+        (i) => !confirmedParticipantIds.has(i.participantId),
+      );
 
       if (unpaid.length > 0) {
         await tx.roundItem.updateMany({
@@ -123,11 +132,17 @@ export class SettlementService {
    * Re-evaluate a round after a payment changes. Fires if covered; otherwise
    * marks PARTIALLY_PAID when at least one portion is in.
    */
-  private async recompute(tx: Db, roundId: string): Promise<RoundPaidEvent | null> {
+  private async recompute(
+    tx: Db,
+    roundId: string,
+  ): Promise<RoundPaidEvent | null> {
     const round = await tx.round.findUnique({
       where: { id: roundId },
       include: {
-        items: { where: { status: RoundItemStatus.ACTIVE }, include: { menuItem: true } },
+        items: {
+          where: { status: RoundItemStatus.ACTIVE },
+          include: { menuItem: true },
+        },
         payments: true,
         session: true,
       },
@@ -137,7 +152,11 @@ export class SettlementService {
     const confirmed = round.payments.filter((p) => p.status === 'CONFIRMED');
     if (confirmed.length === 0) return null;
 
-    const covered = isRoundCovered(round.settlementMode, round.items, confirmed);
+    const covered = isRoundCovered(
+      round.settlementMode,
+      round.items,
+      confirmed,
+    );
     if (!covered) {
       await tx.round.update({
         where: { id: roundId },
@@ -162,7 +181,9 @@ export class SettlementService {
   ): Promise<RoundPaidEvent> {
     const locationId = round.session.locationId;
     const tableId = round.session.tableId;
-    const location = await tx.location.findUniqueOrThrow({ where: { id: locationId } });
+    const location = await tx.location.findUniqueOrThrow({
+      where: { id: locationId },
+    });
 
     // 1. Kitchen ticket (UNIQUE round_id guarantees one ticket per round).
     const ticket = await tx.kitchenTicket.create({
@@ -208,7 +229,9 @@ export class SettlementService {
               description: i.menuItem.name,
               itemCode: i.menuItem.itemCode,
               quantity: i.quantity,
-              unitPrice: round2(new Prisma.Decimal(i.lineTotal).div(i.quantity)),
+              unitPrice: round2(
+                new Prisma.Decimal(i.lineTotal).div(i.quantity),
+              ),
               taxRate: i.menuItem.taxRate,
               taxAmount: taxFromGross(i.lineTotal, i.menuItem.taxRate),
             })),
@@ -229,6 +252,12 @@ export class SettlementService {
     });
 
     this.logger.log(`round ${round.id} PAID -> fired ticket ${ticket.id}`);
-    return { roundId: round.id, locationId, ticketId: ticket.id, invoiceIds, tableId };
+    return {
+      roundId: round.id,
+      locationId,
+      ticketId: ticket.id,
+      invoiceIds,
+      tableId,
+    };
   }
 }

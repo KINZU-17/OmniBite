@@ -97,7 +97,9 @@ export class RealtimeGateway
         status: { in: ['QUEUED', 'IN_PREP', 'READY'] },
         firedAt: { gt: since },
       },
-      include: { lines: { include: { roundItem: { include: { menuItem: true } } } } },
+      include: {
+        lines: { include: { roundItem: { include: { menuItem: true } } } },
+      },
       orderBy: { firedAt: 'asc' },
     });
     return { tickets };

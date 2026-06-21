@@ -27,7 +27,11 @@ export class MpesaService {
    * moves INITIATED -> PENDING and an mpesa_transactions row records the checkout
    * id. The customer now sees the PIN prompt; nothing fires until the callback.
    */
-  async initiate(payment: Payment, phone: string, accountReference: string): Promise<void> {
+  async initiate(
+    payment: Payment,
+    phone: string,
+    accountReference: string,
+  ): Promise<void> {
     let res;
     try {
       res = await this.client.stkPush({
@@ -37,13 +41,18 @@ export class MpesaService {
         description: 'OmniBite',
       });
     } catch (err) {
-      this.logger.error(`STK push failed for payment ${payment.id}: ${String(err)}`);
+      this.logger.error(
+        `STK push failed for payment ${payment.id}: ${String(err)}`,
+      );
       await this.settlement.failPayment(payment.id, 'STK push request failed');
       return;
     }
 
     if (res.ResponseCode !== '0' || !res.CheckoutRequestID) {
-      await this.settlement.failPayment(payment.id, `STK not accepted: ${res.ResponseCode}`);
+      await this.settlement.failPayment(
+        payment.id,
+        `STK not accepted: ${res.ResponseCode}`,
+      );
       return;
     }
 
@@ -118,7 +127,10 @@ export class MpesaService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async reapPending(): Promise<void> {
-    const timeoutSec = this.config.get<number>('MPESA_STATUS_TIMEOUT_SECONDS', 120);
+    const timeoutSec = this.config.get<number>(
+      'MPESA_STATUS_TIMEOUT_SECONDS',
+      120,
+    );
     const cutoff = new Date(Date.now() - timeoutSec * 1000);
 
     const stale = await this.prisma.payment.findMany({
@@ -152,7 +164,9 @@ export class MpesaService {
           });
         }
       } catch (err) {
-        this.logger.warn(`status query failed for ${payment.id}: ${String(err)}`);
+        this.logger.warn(
+          `status query failed for ${payment.id}: ${String(err)}`,
+        );
       }
     }
   }

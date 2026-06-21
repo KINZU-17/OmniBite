@@ -22,7 +22,9 @@ export class MenuService {
       where: { locationId },
       include: {
         allergens: true,
-        modifierGroups: { include: { modifierGroup: { include: { modifiers: true } } } },
+        modifierGroups: {
+          include: { modifierGroup: { include: { modifiers: true } } },
+        },
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
@@ -34,7 +36,9 @@ export class MenuService {
    * since 86ing is a controlled action.
    */
   async toggle86(menuItemId: string, is86: boolean, staff: Staff) {
-    const item = await this.prisma.menuItem.findUnique({ where: { id: menuItemId } });
+    const item = await this.prisma.menuItem.findUnique({
+      where: { id: menuItemId },
+    });
     if (!item) throw new NotFoundException('menu item not found');
 
     const updated = await this.prisma.menuItem.update({
@@ -69,7 +73,9 @@ export class MenuService {
     for (const item of fired) {
       await this.refunds
         .autoRefundItem(item.id)
-        .catch((e) => this.logger.warn(`auto-refund failed for ${item.id}: ${String(e)}`));
+        .catch((e) =>
+          this.logger.warn(`auto-refund failed for ${item.id}: ${String(e)}`),
+        );
     }
   }
 }

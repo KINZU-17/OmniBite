@@ -31,7 +31,9 @@ export class EtimsService {
   async onRoundPaid(evt: RoundPaidEvent): Promise<void> {
     for (const invoiceId of evt.invoiceIds) {
       await this.transmit(invoiceId).catch((err) =>
-        this.logger.warn(`initial eTIMS transmit failed for ${invoiceId}: ${String(err)}`),
+        this.logger.warn(
+          `initial eTIMS transmit failed for ${invoiceId}: ${String(err)}`,
+        ),
       );
     }
   }
@@ -42,7 +44,10 @@ export class EtimsService {
     if (!this.client.configured) return; // nothing to do until eTIMS is wired up
     const maxRetries = this.config.get<number>('ETIMS_MAX_RETRIES', 20);
     const due = await this.prisma.etimsInvoice.findMany({
-      where: { status: { in: [EtimsStatus.PENDING, EtimsStatus.FAILED] }, retryCount: { lt: maxRetries } },
+      where: {
+        status: { in: [EtimsStatus.PENDING, EtimsStatus.FAILED] },
+        retryCount: { lt: maxRetries },
+      },
       select: { id: true },
       take: 50,
     });
@@ -101,7 +106,9 @@ export class EtimsService {
           lastError: null,
         },
       });
-      this.logger.log(`eTIMS ${invoice.docType} ${invoiceId} transmitted (${result.invoiceNo})`);
+      this.logger.log(
+        `eTIMS ${invoice.docType} ${invoiceId} transmitted (${result.invoiceNo})`,
+      );
     } catch (err) {
       await this.prisma.etimsInvoice.update({
         where: { id: invoiceId },
@@ -137,9 +144,16 @@ export class EtimsService {
     },
   ): Promise<string> {
     const taxAmount = sum(
-      params.lines.map((l) => taxFromGross(new Prisma.Decimal(l.unitPrice).mul(l.quantity), l.taxRate)),
+      params.lines.map((l) =>
+        taxFromGross(
+          new Prisma.Decimal(l.unitPrice).mul(l.quantity),
+          l.taxRate,
+        ),
+      ),
     );
-    const totalAmount = sum(params.lines.map((l) => new Prisma.Decimal(l.unitPrice).mul(l.quantity)));
+    const totalAmount = sum(
+      params.lines.map((l) => new Prisma.Decimal(l.unitPrice).mul(l.quantity)),
+    );
 
     const creditNote = await db.etimsInvoice.create({
       data: {
@@ -158,7 +172,10 @@ export class EtimsService {
             quantity: l.quantity,
             unitPrice: round2(l.unitPrice),
             taxRate: new Prisma.Decimal(l.taxRate),
-            taxAmount: taxFromGross(new Prisma.Decimal(l.unitPrice).mul(l.quantity), l.taxRate),
+            taxAmount: taxFromGross(
+              new Prisma.Decimal(l.unitPrice).mul(l.quantity),
+              l.taxRate,
+            ),
           })),
         },
       },

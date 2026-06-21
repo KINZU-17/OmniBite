@@ -29,7 +29,11 @@ describe('86 after payment → auto-refund', () => {
   it('auto-refunds a fired item when it is 86ed', async () => {
     const scan = await api()
       .post('/sessions/scan')
-      .send({ qrToken: fx.table.qrToken, displayName: 'Eli', phone: '254700000444' })
+      .send({
+        qrToken: fx.table.qrToken,
+        displayName: 'Eli',
+        phone: '254700000444',
+      })
       .expect(201);
     const sessionId: string = scan.body.sessionId;
     const participantId: string = scan.body.participant.id;
@@ -44,11 +48,19 @@ describe('86 after payment → auto-refund', () => {
 
     const submit = await api()
       .post(`/rounds/${roundId}/submit`)
-      .send({ settlementMode: 'SINGLE_PAYER', payments: [{ participantId, method: 'CASH' }] })
+      .send({
+        settlementMode: 'SINGLE_PAYER',
+        payments: [{ participantId, method: 'CASH' }],
+      })
       .expect(201);
     const paymentId: string = submit.body.payments[0].id;
-    await api().post(`/payments/${paymentId}/cash`).set('x-staff-id', fx.staff.server.id).expect(201);
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe('FIRED');
+    await api()
+      .post(`/payments/${paymentId}/cash`)
+      .set('x-staff-id', fx.staff.server.id)
+      .expect(201);
+    expect(
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('FIRED');
 
     // 86 the Fries (kitchen) → the fired item is auto-refunded inside the handler.
     await api()
@@ -58,16 +70,21 @@ describe('86 after payment → auto-refund', () => {
       .expect(200);
 
     // The round item is marked refunded.
-    expect((await prisma.roundItem.findUniqueOrThrow({ where: { id: roundItemId } })).status).toBe(
-      'REFUNDED',
-    );
+    expect(
+      (await prisma.roundItem.findUniqueOrThrow({ where: { id: roundItemId } }))
+        .status,
+    ).toBe('REFUNDED');
 
     // A refund was created with the auto-refund reason, plus a credit note.
-    const refund = await prisma.refund.findFirstOrThrow({ where: { roundItemId } });
+    const refund = await prisma.refund.findFirstOrThrow({
+      where: { roundItemId },
+    });
     expect(refund.reasonCode).toBe('ITEM_86_AFTER_PAID');
     expect(['RESOLVED_CREDIT', 'REVERSAL_PENDING']).toContain(refund.status);
     expect(
-      await prisma.etimsInvoice.count({ where: { paymentId, docType: 'CREDIT_NOTE' } }),
+      await prisma.etimsInvoice.count({
+        where: { paymentId, docType: 'CREDIT_NOTE' },
+      }),
     ).toBe(1);
   });
 });

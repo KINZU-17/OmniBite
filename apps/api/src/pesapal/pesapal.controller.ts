@@ -19,14 +19,19 @@ export class PesapalController {
 
   @Post('ipn')
   @HttpCode(200)
-  ipnPost(@Body() b: Record<string, string>, @Query() q: Record<string, string>) {
+  ipnPost(
+    @Body() b: Record<string, string>,
+    @Query() q: Record<string, string>,
+  ) {
     return this.ack({ ...q, ...b });
   }
 
   private async ack(p: Record<string, string>) {
     const orderTrackingId = p.OrderTrackingId ?? p.orderTrackingId ?? '';
-    const merchantRef = p.OrderMerchantReference ?? p.orderMerchantReference ?? '';
-    const notifType = p.OrderNotificationType ?? p.orderNotificationType ?? 'IPNCHANGE';
+    const merchantRef =
+      p.OrderMerchantReference ?? p.orderMerchantReference ?? '';
+    const notifType =
+      p.OrderNotificationType ?? p.orderNotificationType ?? 'IPNCHANGE';
     if (orderTrackingId) await this.pesapal.handleIpn(orderTrackingId);
     return {
       orderNotificationType: notifType,
