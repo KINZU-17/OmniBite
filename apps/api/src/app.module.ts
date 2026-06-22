@@ -11,6 +11,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { GateModule } from './gate/gate.module';
 import { MenuModule } from './menu/menu.module';
+import { TablesModule } from './tables/tables.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { MpesaModule } from './mpesa/mpesa.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -33,6 +34,7 @@ import { ReconModule } from './recon/recon.module';
     GateModule,
     // Domain
     MenuModule,
+    TablesModule,
     SessionsModule,
     MpesaModule,
     PaymentsModule,

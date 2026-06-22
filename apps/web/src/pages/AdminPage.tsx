@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { QRCodeCanvas } from 'qrcode.react';
 import { api } from '../lib/api';
 import type { MenuItem } from '../types';
 
@@ -94,6 +95,7 @@ function AdminGate({ onReady }: { onReady: (a: AdminAuth) => void }) {
 
 function AdminMenu({ auth, onSignOut }: { auth: AdminAuth; onSignOut: () => void }) {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<'menu' | 'tables'>('menu');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -126,7 +128,7 @@ function AdminMenu({ auth, onSignOut }: { auth: AdminAuth; onSignOut: () => void
     <div className="mx-auto max-w-2xl p-4">
       <header className="mb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-teal-700">Menu admin</h1>
+          <h1 className="text-xl font-bold text-teal-700">Restaurant admin</h1>
           <p className="text-xs text-slate-400">location {auth.locationId.slice(0, 8)}…</p>
         </div>
         <button className="text-sm text-slate-500 underline" onClick={onSignOut}>
@@ -134,50 +136,239 @@ function AdminMenu({ auth, onSignOut }: { auth: AdminAuth; onSignOut: () => void
         </button>
       </header>
 
-      {error && <p className="mb-3 rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>}
+      <div className="mb-4 flex gap-2">
+        {(['menu', 'tables'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-semibold capitalize ${
+              tab === t ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
 
-      <NewItemForm
-        disabled={busy}
-        onCreate={(body) =>
-          run(async () => {
-            await staffApi('/menu-items', {
-              method: 'POST',
-              body: JSON.stringify({ ...body, locationId: auth.locationId }),
-            });
-          })
-        }
-      />
+      {tab === 'tables' ? (
+        <TablesManager auth={auth} />
+      ) : (
+        <>
+          {error && <p className="mb-3 rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>}
 
-      <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        {menuQuery.data?.length ?? 0} items
-      </h2>
-      {menuQuery.isLoading && <p>Loading…</p>}
-      <div className="space-y-3">
-        {menuQuery.data?.map((item) => (
-          <ItemRow
-            key={item.id}
-            item={item}
+          <NewItemForm
             disabled={busy}
-            onSave={(body) =>
+            onCreate={(body) =>
               run(async () => {
-                await staffApi(`/menu-items/${item.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+                await staffApi('/menu-items', {
+                  method: 'POST',
+                  body: JSON.stringify({ ...body, locationId: auth.locationId }),
+                });
               })
             }
-            onToggle86={(is86) =>
-              run(async () => {
-                await staffApi(`/menu-items/${item.id}/availability`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ is86 }),
+          />
+
+          <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            {menuQuery.data?.length ?? 0} items
+          </h2>
+          {menuQuery.isLoading && <p>Loading…</p>}
+          <div className="space-y-3">
+            {menuQuery.data?.map((item) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                disabled={busy}
+                onSave={(body) =>
+                  run(async () => {
+                    await staffApi(`/menu-items/${item.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+                  })
+                }
+                onToggle86={(is86) =>
+                  run(async () => {
+                    await staffApi(`/menu-items/${item.id}/availability`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({ is86 }),
+                    });
+                  })
+                }
+                onDelete={() =>
+                  run(async () => {
+                    await staffApi(`/menu-items/${item.id}`, { method: 'DELETE' });
+                  })
+                }
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface TableRow {
+  id: string;
+  tableNumber: string;
+  qrToken: string;
+  floorState: string;
+}
+
+function TablesManager({ auth }: { auth: AdminAuth }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [newNumber, setNewNumber] = useState('');
+
+  const tablesQuery = useQuery({
+    queryKey: ['admin-tables', auth.locationId],
+    queryFn: () =>
+      api<TableRow[]>(`/locations/${auth.locationId}/tables`, {
+        headers: { 'x-staff-id': auth.staffId },
+      }),
+  });
+
+  const staffApi = <T,>(path: string, opts: RequestInit = {}) =>
+    api<T>(path, { ...opts, headers: { 'x-staff-id': auth.staffId, ...(opts.headers ?? {}) } });
+
+  async function run(fn: () => Promise<void>): Promise<boolean> {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await queryClient.invalidateQueries({ queryKey: ['admin-tables', auth.locationId] });
+      return true;
+    } catch (e) {
+      setError(String(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      {error && <p className="mb-3 rounded bg-red-50 p-2 text-sm text-red-600">{error}</p>}
+
+      <section className="rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="mb-3 font-semibold">Add a table</h2>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded border border-slate-300 p-2 text-sm"
+            placeholder="Table number / name (e.g. 12 or Patio 3)"
+            value={newNumber}
+            onChange={(e) => setNewNumber(e.target.value)}
+          />
+          <button
+            className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            disabled={busy || !newNumber.trim()}
+            onClick={async () => {
+              const ok = await run(async () => {
+                await staffApi('/tables', {
+                  method: 'POST',
+                  body: JSON.stringify({ locationId: auth.locationId, tableNumber: newNumber.trim() }),
                 });
+              });
+              if (ok) setNewNumber('');
+            }}
+          >
+            Add table
+          </button>
+        </div>
+      </section>
+
+      <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        {tablesQuery.data?.length ?? 0} tables
+      </h2>
+      {tablesQuery.isLoading && <p>Loading…</p>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {tablesQuery.data?.map((t) => (
+          <TableCard
+            key={t.id}
+            table={t}
+            disabled={busy}
+            onRename={(tableNumber) =>
+              run(async () => {
+                await staffApi(`/tables/${t.id}`, { method: 'PATCH', body: JSON.stringify({ tableNumber }) });
+              })
+            }
+            onRotate={() =>
+              run(async () => {
+                await staffApi(`/tables/${t.id}/rotate-token`, { method: 'POST' });
               })
             }
             onDelete={() =>
               run(async () => {
-                await staffApi(`/menu-items/${item.id}`, { method: 'DELETE' });
+                await staffApi(`/tables/${t.id}`, { method: 'DELETE' });
               })
             }
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function TableCard({
+  table,
+  disabled,
+  onRename,
+  onRotate,
+  onDelete,
+}: {
+  table: TableRow;
+  disabled: boolean;
+  onRename: (tableNumber: string) => void;
+  onRotate: () => void;
+  onDelete: () => void;
+}) {
+  const [number, setNumber] = useState(table.tableNumber);
+  const url = `${window.location.origin}/t/${table.qrToken}`;
+
+  const download = () => {
+    const canvas = document.getElementById(`qr-${table.id}`) as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `omnibite-table-${table.tableNumber}.png`;
+    a.click();
+  };
+
+  return (
+    <div className="rounded-xl border bg-white p-4 text-center shadow-sm">
+      <QRCodeCanvas id={`qr-${table.id}`} value={url} size={148} marginSize={2} className="mx-auto" />
+      <div className="mt-2 flex items-center justify-center gap-2">
+        <input
+          className="w-24 rounded border border-slate-300 p-1 text-center text-sm"
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+        />
+        <button
+          className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40"
+          disabled={disabled || !number.trim() || number === table.tableNumber}
+          onClick={() => onRename(number.trim())}
+        >
+          Rename
+        </button>
+      </div>
+      <p className="mt-1 break-all text-[10px] text-slate-400">{url}</p>
+      <div className="mt-2 flex flex-wrap justify-center gap-2">
+        <button className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600" onClick={download}>
+          Download
+        </button>
+        <button
+          className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-40"
+          disabled={disabled}
+          onClick={onRotate}
+          title="Generate a new code; the old printed one stops working"
+        >
+          Rotate
+        </button>
+        <button
+          className="rounded border border-red-200 px-2 py-1 text-xs font-semibold text-red-600 disabled:opacity-40"
+          disabled={disabled}
+          onClick={onDelete}
+        >
+          Delete
+        </button>
       </div>
     </div>
   );
