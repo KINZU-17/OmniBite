@@ -17,8 +17,7 @@ async function bootstrap() {
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
     const adapter = new RedisIoAdapter(app);
-    await adapter.connectToRedis(redisUrl);
-    app.useWebSocketAdapter(adapter);
+    adapter.connectToRedis(redisUrl);
   }
 
   // Allow Prisma's onModuleDestroy to run on SIGINT/SIGTERM.
@@ -26,4 +25,4 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();

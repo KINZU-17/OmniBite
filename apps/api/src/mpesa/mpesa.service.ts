@@ -77,8 +77,17 @@ export class MpesaService {
    * Daraja callback — the source of truth. Idempotent on the M-Pesa receipt so a
    * replayed callback never double-confirms. Caller must ack with 200 quickly.
    */
-  async handleCallback(body: any): Promise<void> {
-    const cb = body?.Body?.stkCallback ?? body?.stkCallback ?? body;
+  async handleCallback(body: unknown): Promise<void> {
+    const request = body as {
+      Body?: { stkCallback?: unknown };
+      stkCallback?: unknown;
+    };
+    const cb = (request.Body?.stkCallback ?? request.stkCallback ?? body) as {
+      CheckoutRequestID?: string;
+      ResultCode?: string | number;
+      CallbackMetadata?: { Item?: unknown[] };
+      ResultDesc?: string;
+    };
     const checkoutRequestId: string | undefined = cb?.CheckoutRequestID;
     if (!checkoutRequestId) {
       this.logger.warn('callback without CheckoutRequestID, ignoring');
@@ -96,7 +105,14 @@ export class MpesaService {
 
     const resultCode = Number(cb.ResultCode);
     if (resultCode === 0) {
-      const items: MetaItem[] = cb.CallbackMetadata?.Item ?? [];
+      const items: MetaItem[] =
+        Array.isArray(cb.CallbackMetadata?.Item) &&
+        cb.CallbackMetadata.Item.every(
+          (item): item is MetaItem =>
+            typeof item === 'object' && item !== null && 'Name' in item,
+        )
+          ? cb.CallbackMetadata.Item
+          : [];
       const receipt = String(this.meta(items, 'MpesaReceiptNumber') ?? '');
       try {
         await this.prisma.mpesaTransaction.update({

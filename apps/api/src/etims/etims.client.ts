@@ -60,11 +60,18 @@ export class EtimsClient {
         Authorization: `Bearer ${this.config.get<string>('ETIMS_API_KEY', '')}`,
       },
     });
+    const body = res.data as Record<string, unknown>;
     return {
       invoiceNo: String(
-        res.data.invoiceNo ?? res.data.fiscalDocumentNumber ?? '',
+        (body.invoiceNo as string | undefined) ??
+          (body.fiscalDocumentNumber as string | undefined) ??
+          '',
       ),
-      qrData: String(res.data.qrData ?? res.data.qrCode ?? ''),
+      qrData: String(
+        (body.qrData as string | undefined) ??
+          (body.qrCode as string | undefined) ??
+          '',
+      ),
     };
   }
 }

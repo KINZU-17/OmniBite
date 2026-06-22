@@ -55,10 +55,15 @@ describe('M-Pesa callback idempotency', () => {
         phone: '254700000555',
       })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const participantId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const participantId: string = scanBody.participant.id;
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
-    const roundId: string = round.body.id;
+    const roundBody = round.body as { id: string };
+    const roundId: string = roundBody.id;
     await api()
       .post(`/rounds/${roundId}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId, quantity: 1 })

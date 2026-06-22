@@ -25,7 +25,7 @@ export async function bootstrap(
   await app.init();
 
   const scheduler = app.get(SchedulerRegistry);
-  for (const job of scheduler.getCronJobs().values()) job.stop();
+  for (const job of scheduler.getCronJobs().values()) void job.stop();
 
   return { app, prisma: app.get(PrismaService) };
 }

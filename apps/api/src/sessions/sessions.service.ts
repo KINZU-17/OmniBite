@@ -135,6 +135,7 @@ export class SessionsService {
 
   /** SETTLED -> NEEDS_BUSSING (staff marks the empty table for reset). */
   async markNeedsBussing(sessionId: string, _staff: Staff) {
+    void _staff;
     const session = await this.prisma.tableSession.findUnique({
       where: { id: sessionId },
     });
@@ -158,6 +159,7 @@ export class SessionsService {
 
   /** NEEDS_BUSSING -> CLOSED, table freed. */
   async close(sessionId: string, _staff: Staff) {
+    void _staff;
     const session = await this.prisma.tableSession.findUnique({
       where: { id: sessionId },
     });

@@ -53,11 +53,16 @@ describe('Card payment via Pesapal', () => {
         phone: '254700000777',
       })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const participantId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const participantId: string = scanBody.participant.id;
 
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
-    const roundId: string = round.body.id;
+    const roundBody = round.body as { id: string };
+    const roundId: string = roundBody.id;
     await api()
       .post(`/rounds/${roundId}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId, quantity: 1 })
@@ -71,8 +76,12 @@ describe('Card payment via Pesapal', () => {
         payments: [{ participantId, method: 'CARD' }],
       })
       .expect(201);
-    const payment = submit.body.payments[0];
-    expect(submit.body.cardRedirects).toEqual([
+    const submitBody = submit.body as {
+      payments: Array<{ id: string }>;
+      cardRedirects: Array<{ paymentId: string; redirectUrl: string }>;
+    };
+    const payment = submitBody.payments[0];
+    expect(submitBody.cardRedirects).toEqual([
       {
         paymentId: payment.id,
         redirectUrl: 'https://pesapal.test/checkout/track-123',

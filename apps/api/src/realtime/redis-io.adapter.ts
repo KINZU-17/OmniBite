@@ -9,16 +9,18 @@ import type { ServerOptions } from 'socket.io';
  * boots without Redis in single-instance dev.
  */
 export class RedisIoAdapter extends IoAdapter {
-  private adapterConstructor!: ReturnType<typeof createAdapter>;
+  private adapterConstructor: unknown;
 
-  async connectToRedis(url: string): Promise<void> {
+  connectToRedis(url: string): void {
     const pubClient = new Redis(url);
     const subClient = pubClient.duplicate();
-    this.adapterConstructor = createAdapter(pubClient, subClient);
+    this.adapterConstructor = createAdapter(pubClient, subClient) as unknown;
   }
 
   createIOServer(port: number, options?: ServerOptions): unknown {
-    const server = super.createIOServer(port, options);
+    const server = super.createIOServer(port, options) as unknown as {
+      adapter: (fn: unknown) => void;
+    };
     server.adapter(this.adapterConstructor);
     return server;
   }

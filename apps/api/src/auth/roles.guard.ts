@@ -20,7 +20,8 @@ export class RolesGuard implements CanActivate {
     ]);
     if (!required || required.length === 0) return true;
 
-    const staff = ctx.switchToHttp().getRequest().staff as Staff | undefined;
+    const req = ctx.switchToHttp().getRequest();
+    const staff = req.staff;
     if (!staff) throw new ForbiddenException('no staff context');
     // ADMIN is a superuser for Phase 1.
     if (staff.role === StaffRole.ADMIN) return true;

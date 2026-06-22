@@ -63,8 +63,9 @@ export class MpesaClient {
         headers: { Authorization: `Basic ${basic}` },
       },
     );
-    const value = res.data.access_token as string;
-    const ttl = Number(res.data.expires_in ?? 3599) * 1000;
+    const body = res.data as Record<string, unknown>;
+    const value = String((body.access_token as string | undefined) ?? '');
+    const ttl = Number(body.expires_in ?? 3599) * 1000;
     this.token = { value, expiresAt: Date.now() + ttl };
     return value;
   }
@@ -105,7 +106,11 @@ export class MpesaClient {
     const res = await this.http.post('/mpesa/stkpush/v1/processrequest', body, {
       headers: await this.authHeaders(),
     });
-    return res.data;
+    return res.data as {
+      MerchantRequestID?: string;
+      CheckoutRequestID?: string;
+      ResponseCode?: string;
+    };
   }
 
   /** Status-query backstop for a dropped callback. */
@@ -122,7 +127,7 @@ export class MpesaClient {
     const res = await this.http.post('/mpesa/stkpushquery/v1/query', body, {
       headers: await this.authHeaders(),
     });
-    return res.data;
+    return res.data as { ResultCode?: string; ResultDesc?: string };
   }
 
   /** Reversal — operationally heavy; store credit is OmniBite's default remedy. */
@@ -153,6 +158,6 @@ export class MpesaClient {
     const res = await this.http.post('/mpesa/reversal/v1/request', body, {
       headers: await this.authHeaders(),
     });
-    return res.data;
+    return res.data as unknown;
   }
 }

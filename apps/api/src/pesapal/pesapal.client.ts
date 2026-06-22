@@ -68,10 +68,13 @@ export class PesapalClient {
       },
       { headers: { Accept: 'application/json' } },
     );
-    const value = res.data.token as string;
-    const expiresAt = res.data.expiryDate
-      ? Date.parse(res.data.expiryDate)
-      : Date.now() + 5 * 60_000;
+    const body = res.data as Record<string, unknown>;
+    const value = String((body.token as string | undefined) ?? '');
+    const expiryRaw = body.expiryDate;
+    const expiresAt =
+      typeof expiryRaw === 'string'
+        ? Date.parse(expiryRaw)
+        : Date.now() + 5 * 60_000;
     this.token = { value, expiresAt };
     return value;
   }
@@ -102,10 +105,15 @@ export class PesapalClient {
       body,
       { headers: await this.authHeaders() },
     );
+    const resp = res.data as Record<string, unknown>;
     return {
-      orderTrackingId: String(res.data.order_tracking_id ?? ''),
-      merchantReference: String(res.data.merchant_reference ?? p.reference),
-      redirectUrl: String(res.data.redirect_url ?? ''),
+      orderTrackingId: String(
+        (resp.order_tracking_id as string | undefined) ?? '',
+      ),
+      merchantReference: String(
+        (resp.merchant_reference as string | undefined) ?? p.reference,
+      ),
+      redirectUrl: String((resp.redirect_url as string | undefined) ?? ''),
     };
   }
 
@@ -115,12 +123,16 @@ export class PesapalClient {
       params: { orderTrackingId },
       headers: await this.authHeaders(),
     });
+    const resp = res.data as Record<string, unknown>;
     return {
-      statusCode: Number(res.data.status_code ?? 0),
-      description: String(res.data.payment_status_description ?? ''),
-      confirmationCode: res.data.confirmation_code
-        ? String(res.data.confirmation_code)
-        : undefined,
+      statusCode: Number((resp.status_code as number | undefined) ?? 0),
+      description: String(
+        (resp.payment_status_description as string | undefined) ?? '',
+      ),
+      confirmationCode:
+        typeof resp.confirmation_code === 'string'
+          ? resp.confirmation_code
+          : undefined,
     };
   }
 }
