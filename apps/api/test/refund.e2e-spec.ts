@@ -42,10 +42,16 @@ describe('Refund → credit note + store credit + audit', () => {
     const submit = await api()
       .post(`/rounds/${round.body.id}/submit`)
       // Attach the participant so the refund has a phone to credit.
-      .send({ settlementMode: 'SINGLE_PAYER', payments: [{ participantId, method: 'CASH' }] })
+      .send({
+        settlementMode: 'SINGLE_PAYER',
+        payments: [{ participantId, method: 'CASH' }],
+      })
       .expect(201);
     const paymentId: string = submit.body.payments[0].id;
-    await api().post(`/payments/${paymentId}/cash`).set('x-staff-id', fx.staff.server.id).expect(201);
+    await api()
+      .post(`/payments/${paymentId}/cash`)
+      .set('x-staff-id', fx.staff.server.id)
+      .expect(201);
     return { paymentId, phone };
   }
 
@@ -62,7 +68,10 @@ describe('Refund → credit note + store credit + audit', () => {
     expect(req.body.status).toBe('REQUESTED');
     expect(Number(req.body.amount)).toBe(350);
 
-    await api().post(`/refunds/${refundId}/approve`).set('x-staff-id', mgr).expect(201);
+    await api()
+      .post(`/refunds/${refundId}/approve`)
+      .set('x-staff-id', mgr)
+      .expect(201);
     const resolved = await api()
       .post(`/refunds/${refundId}/resolve`)
       .set('x-staff-id', mgr)

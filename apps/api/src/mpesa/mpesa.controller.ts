@@ -12,7 +12,9 @@ export class MpesaController {
    */
   @Post('callback')
   @HttpCode(200)
-  async callback(@Body() body: unknown): Promise<{ ResultCode: number; ResultDesc: string }> {
+  async callback(
+    @Body() body: unknown,
+  ): Promise<{ ResultCode: number; ResultDesc: string }> {
     await this.mpesa.handleCallback(body);
     return { ResultCode: 0, ResultDesc: 'Accepted' };
   }

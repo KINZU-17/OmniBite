@@ -33,8 +33,11 @@ export class SessionsService {
 
       // Reuse only if the linked session is still ACTIVE.
       if (sessionId) {
-        const existing = await tx.tableSession.findUnique({ where: { id: sessionId } });
-        if (!existing || existing.status !== SessionStatus.ACTIVE) sessionId = null;
+        const existing = await tx.tableSession.findUnique({
+          where: { id: sessionId },
+        });
+        if (!existing || existing.status !== SessionStatus.ACTIVE)
+          sessionId = null;
       }
 
       if (!sessionId) {
@@ -60,8 +63,17 @@ export class SessionsService {
         },
       });
 
-      this.realtime.emitTableState(table.locationId, table.id, TableFloorState.SEATED);
-      return { sessionId, participant, locationId: table.locationId, tableId: table.id };
+      this.realtime.emitTableState(
+        table.locationId,
+        table.id,
+        TableFloorState.SEATED,
+      );
+      return {
+        sessionId,
+        participant,
+        locationId: table.locationId,
+        tableId: table.id,
+      };
     });
   }
 
@@ -109,7 +121,9 @@ export class SessionsService {
     if (!session) throw new NotFoundException('session not found');
     if (session.status !== SessionStatus.ACTIVE) return session;
 
-    const open = session.rounds.filter((r) => !TERMINAL_ROUND.includes(r.status));
+    const open = session.rounds.filter(
+      (r) => !TERMINAL_ROUND.includes(r.status),
+    );
     if (open.length > 0) {
       throw new BadRequestException('cannot settle: rounds still in progress');
     }
@@ -121,7 +135,9 @@ export class SessionsService {
 
   /** SETTLED -> NEEDS_BUSSING (staff marks the empty table for reset). */
   async markNeedsBussing(sessionId: string, _staff: Staff) {
-    const session = await this.prisma.tableSession.findUnique({ where: { id: sessionId } });
+    const session = await this.prisma.tableSession.findUnique({
+      where: { id: sessionId },
+    });
     if (!session) throw new NotFoundException('session not found');
 
     const updated = await this.prisma.tableSession.update({
@@ -132,13 +148,19 @@ export class SessionsService {
       where: { id: session.tableId },
       data: { floorState: TableFloorState.NEEDS_BUSSING },
     });
-    this.realtime.emitTableState(session.locationId, session.tableId, TableFloorState.NEEDS_BUSSING);
+    this.realtime.emitTableState(
+      session.locationId,
+      session.tableId,
+      TableFloorState.NEEDS_BUSSING,
+    );
     return updated;
   }
 
   /** NEEDS_BUSSING -> CLOSED, table freed. */
   async close(sessionId: string, _staff: Staff) {
-    const session = await this.prisma.tableSession.findUnique({ where: { id: sessionId } });
+    const session = await this.prisma.tableSession.findUnique({
+      where: { id: sessionId },
+    });
     if (!session) throw new NotFoundException('session not found');
 
     return this.prisma.$transaction(async (tx) => {
@@ -150,13 +172,19 @@ export class SessionsService {
         where: { id: session.tableId },
         data: { floorState: TableFloorState.OPEN, currentSessionId: null },
       });
-      this.realtime.emitTableState(session.locationId, session.tableId, TableFloorState.OPEN);
+      this.realtime.emitTableState(
+        session.locationId,
+        session.tableId,
+        TableFloorState.OPEN,
+      );
       return updated;
     });
   }
 
   private async requireActive(sessionId: string) {
-    const session = await this.prisma.tableSession.findUnique({ where: { id: sessionId } });
+    const session = await this.prisma.tableSession.findUnique({
+      where: { id: sessionId },
+    });
     if (!session) throw new NotFoundException('session not found');
     if (session.status !== SessionStatus.ACTIVE) {
       throw new BadRequestException('session is not active');

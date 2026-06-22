@@ -31,7 +31,11 @@ describe('Split-payment window expiry', () => {
     // Diner A scans; diner B joins the same table session.
     const scan = await api()
       .post('/sessions/scan')
-      .send({ qrToken: fx.table.qrToken, displayName: 'Ann', phone: '254700000001' })
+      .send({
+        qrToken: fx.table.qrToken,
+        displayName: 'Ann',
+        phone: '254700000001',
+      })
       .expect(201);
     const sessionId: string = scan.body.sessionId;
     const aId: string = scan.body.participant.id;
@@ -77,9 +81,9 @@ describe('Split-payment window expiry', () => {
       .set('x-staff-id', fx.staff.server.id)
       .expect(201);
     expect(cash.body.fired).toBe(false);
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe(
-      'PARTIALLY_PAID',
-    );
+    expect(
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('PARTIALLY_PAID');
 
     // Force the window into the past and run the reaper directly.
     await prisma.round.update({
@@ -89,7 +93,9 @@ describe('Split-payment window expiry', () => {
     await app.get(RoundsService).reapExpiredWindows();
 
     // The round fired with only A's item; B's item was dropped.
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe('FIRED');
+    expect(
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('FIRED');
     const items = await prisma.roundItem.findMany({ where: { roundId } });
     const aItem = items.find((i) => i.participantId === aId)!;
     const bItem = items.find((i) => i.participantId === bId)!;
@@ -103,7 +109,9 @@ describe('Split-payment window expiry', () => {
     expect(ticket!.lines).toHaveLength(1); // only A's fries fired
     // One invoice for the payer who actually paid.
     expect(
-      await prisma.etimsInvoice.count({ where: { paymentId: payA.id, docType: 'INVOICE' } }),
+      await prisma.etimsInvoice.count({
+        where: { paymentId: payA.id, docType: 'INVOICE' },
+      }),
     ).toBe(1);
   });
 });

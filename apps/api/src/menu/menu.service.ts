@@ -13,7 +13,9 @@ import type { CreateMenuItemDto, UpdateMenuItemDto } from './dto';
 
 const MENU_INCLUDE = {
   allergens: true,
-  modifierGroups: { include: { modifierGroup: { include: { modifiers: true } } } },
+  modifierGroups: {
+    include: { modifierGroup: { include: { modifiers: true } } },
+  },
 } as const;
 
 @Injectable()
@@ -63,7 +65,11 @@ export class MenuService {
       action: 'MENU_ITEM_CREATE',
       entityType: 'menu_item',
       entityId: created.id,
-      after: { name: created.name, basePrice: created.basePrice, itemCode: created.itemCode },
+      after: {
+        name: created.name,
+        basePrice: created.basePrice,
+        itemCode: created.itemCode,
+      },
     });
     return created;
   }
@@ -78,7 +84,10 @@ export class MenuService {
         await tx.menuItemAllergen.deleteMany({ where: { menuItemId: id } });
         if (dto.allergens.length) {
           await tx.menuItemAllergen.createMany({
-            data: dto.allergens.map((allergen) => ({ menuItemId: id, allergen })),
+            data: dto.allergens.map((allergen) => ({
+              menuItemId: id,
+              allergen,
+            })),
           });
         }
       }
@@ -116,7 +125,9 @@ export class MenuService {
     const item = await this.prisma.menuItem.findUnique({ where: { id } });
     if (!item) throw new NotFoundException('menu item not found');
 
-    const referenced = await this.prisma.roundItem.count({ where: { menuItemId: id } });
+    const referenced = await this.prisma.roundItem.count({
+      where: { menuItemId: id },
+    });
     if (referenced > 0) {
       throw new BadRequestException(
         'this item appears on past orders; mark it unavailable (86) instead of deleting',
@@ -125,7 +136,9 @@ export class MenuService {
 
     await this.prisma.$transaction([
       this.prisma.menuItemAllergen.deleteMany({ where: { menuItemId: id } }),
-      this.prisma.menuItemModifierGroup.deleteMany({ where: { menuItemId: id } }),
+      this.prisma.menuItemModifierGroup.deleteMany({
+        where: { menuItemId: id },
+      }),
       this.prisma.menuItem.delete({ where: { id } }),
     ]);
 
@@ -141,7 +154,11 @@ export class MenuService {
   }
 
   private generateItemCode(category?: string | null): string {
-    const prefix = (category ?? 'ITEM').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) || 'ITEM';
+    const prefix =
+      (category ?? 'ITEM')
+        .toUpperCase()
+        .replace(/[^A-Z]/g, '')
+        .slice(0, 4) || 'ITEM';
     const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
     return `KE-${prefix}-${suffix}`;
   }
@@ -152,7 +169,9 @@ export class MenuService {
    * since 86ing is a controlled action.
    */
   async toggle86(menuItemId: string, is86: boolean, staff: Staff) {
-    const item = await this.prisma.menuItem.findUnique({ where: { id: menuItemId } });
+    const item = await this.prisma.menuItem.findUnique({
+      where: { id: menuItemId },
+    });
     if (!item) throw new NotFoundException('menu item not found');
 
     const updated = await this.prisma.menuItem.update({
@@ -187,7 +206,9 @@ export class MenuService {
     for (const item of fired) {
       await this.refunds
         .autoRefundItem(item.id)
-        .catch((e) => this.logger.warn(`auto-refund failed for ${item.id}: ${String(e)}`));
+        .catch((e) =>
+          this.logger.warn(`auto-refund failed for ${item.id}: ${String(e)}`),
+        );
     }
   }
 }

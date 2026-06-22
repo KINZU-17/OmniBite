@@ -9,9 +9,27 @@ import { Station } from '@prisma/client';
  * Unknown categories fall back to PASS (expediter), so nothing is ever dropped.
  */
 const KEYWORDS: Array<[Station, string[]]> = [
-  [Station.GRILL, ['grill', 'steak', 'burger', 'bbq', 'roast', 'kebab', 'nyama', 'choma']],
-  [Station.FRY, ['fry', 'fries', 'chips', 'fried', 'samosa', 'wings', 'tempura']],
-  [Station.COLD, ['cold', 'salad', 'dessert', 'drink', 'beverage', 'juice', 'starter', 'cold-press']],
+  [
+    Station.GRILL,
+    ['grill', 'steak', 'burger', 'bbq', 'roast', 'kebab', 'nyama', 'choma'],
+  ],
+  [
+    Station.FRY,
+    ['fry', 'fries', 'chips', 'fried', 'samosa', 'wings', 'tempura'],
+  ],
+  [
+    Station.COLD,
+    [
+      'cold',
+      'salad',
+      'dessert',
+      'drink',
+      'beverage',
+      'juice',
+      'starter',
+      'cold-press',
+    ],
+  ],
 ];
 
 export function resolveStation(category?: string | null): Station {
