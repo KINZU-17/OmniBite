@@ -53,12 +53,22 @@ export class EtimsClient {
       // integration is configured — never blocks the kitchen.
       throw new Error('eTIMS not configured (ETIMS_BASE_URL unset)');
     }
-    const endpoint = payload.docType === 'CREDIT_NOTE' ? '/credit-notes' : '/invoices';
-    const res = await this.http.post(endpoint, payload, {
-      headers: { Authorization: `Bearer ${this.config.get<string>('ETIMS_API_KEY', '')}` },
+    const endpoint =
+      payload.docType === 'CREDIT_NOTE' ? '/credit-notes' : '/invoices';
+    const res = await this.http.post<{
+      invoiceNo?: string;
+      fiscalDocumentNumber?: string;
+      qrData?: string;
+      qrCode?: string;
+    }>(endpoint, payload, {
+      headers: {
+        Authorization: `Bearer ${this.config.get<string>('ETIMS_API_KEY', '')}`,
+      },
     });
     return {
-      invoiceNo: String(res.data.invoiceNo ?? res.data.fiscalDocumentNumber ?? ''),
+      invoiceNo: String(
+        res.data.invoiceNo ?? res.data.fiscalDocumentNumber ?? '',
+      ),
       qrData: String(res.data.qrData ?? res.data.qrCode ?? ''),
     };
   }

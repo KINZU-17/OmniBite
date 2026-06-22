@@ -4,7 +4,12 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import type { Staff } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Express request after StaffGuard has attached the resolved staff member. */
+export type AuthedRequest = Request & { staff?: Staff };
 
 /**
  * Phase 1 staff authentication: the client sends `x-staff-id` identifying an
@@ -17,7 +22,7 @@ export class StaffGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest();
+    const req = ctx.switchToHttp().getRequest<AuthedRequest>();
     const staffId = req.headers['x-staff-id'] as string | undefined;
     if (!staffId) throw new UnauthorizedException('missing x-staff-id');
 

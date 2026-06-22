@@ -12,6 +12,17 @@ import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { Rooms } from './events';
 
+/** What a connect handshake may carry, and what we stash on socket.data. */
+interface HandshakeAuth {
+  staffId?: string;
+  locationId?: string;
+  rooms?: string[];
+}
+interface SocketData {
+  locationId?: string;
+  staffId?: string;
+}
+
 /**
  * Single Socket.io gateway for the floor app, KDS, and admin dashboard. Carries
  * events only; Postgres holds state. Emits are always scoped to a per-location
@@ -39,10 +50,11 @@ export class RealtimeGateway
   constructor(private readonly prisma: PrismaService) {}
 
   async handleConnection(client: Socket): Promise<void> {
-    const auth = client.handshake.auth ?? {};
-    const staffId = auth.staffId as string | undefined;
-    const guestLocationId = auth.locationId as string | undefined;
-    const requested = (auth.rooms as string[] | undefined) ?? ['floor'];
+    const auth = (client.handshake.auth ?? {}) as HandshakeAuth;
+    const staffId = auth.staffId;
+    const guestLocationId = auth.locationId;
+    const requested = auth.rooms ?? ['floor'];
+    const data = client.data as SocketData;
 
     try {
       if (staffId) {
@@ -54,15 +66,15 @@ export class RealtimeGateway
           client.disconnect(true);
           return;
         }
-        client.data.locationId = staff.locationId;
-        client.data.staffId = staff.id;
+        data.locationId = staff.locationId;
+        data.staffId = staff.id;
         for (const room of requested) {
           if (room === 'kitchen') client.join(Rooms.kitchen(staff.locationId));
           if (room === 'floor') client.join(Rooms.floor(staff.locationId));
         }
       } else if (guestLocationId) {
         // Diner device: read-only, only the floor room for live 86 updates.
-        client.data.locationId = guestLocationId;
+        data.locationId = guestLocationId;
         client.join(Rooms.floor(guestLocationId));
       } else {
         client.disconnect(true);
@@ -88,7 +100,7 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { since?: string },
   ): Promise<{ tickets: unknown[] }> {
-    const locationId = client.data.locationId as string | undefined;
+    const locationId = (client.data as SocketData).locationId;
     if (!locationId) return { tickets: [] };
     const since = body?.since ? new Date(body.since) : new Date(0);
     const tickets = await this.prisma.kitchenTicket.findMany({
@@ -97,7 +109,9 @@ export class RealtimeGateway
         status: { in: ['QUEUED', 'IN_PREP', 'READY'] },
         firedAt: { gt: since },
       },
-      include: { lines: { include: { roundItem: { include: { menuItem: true } } } } },
+      include: {
+        lines: { include: { roundItem: { include: { menuItem: true } } } },
+      },
       orderBy: { firedAt: 'asc' },
     });
     return { tickets };

@@ -60,7 +60,7 @@ export class PesapalClient {
     if (this.token && this.token.expiresAt > Date.now() + 30_000) {
       return this.token.value;
     }
-    const res = await this.http.post(
+    const res = await this.http.post<{ token?: string; expiryDate?: string }>(
       '/api/Auth/RequestToken',
       {
         consumer_key: this.config.get<string>('PESAPAL_CONSUMER_KEY', ''),
@@ -68,7 +68,7 @@ export class PesapalClient {
       },
       { headers: { Accept: 'application/json' } },
     );
-    const value = res.data.token as string;
+    const value = res.data.token ?? '';
     const expiresAt = res.data.expiryDate
       ? Date.parse(res.data.expiryDate)
       : Date.now() + 5 * 60_000;
@@ -97,11 +97,13 @@ export class PesapalClient {
         phone_number: p.phone ?? undefined,
       },
     };
-    const res = await this.http.post(
-      '/api/Transactions/SubmitOrderRequest',
-      body,
-      { headers: await this.authHeaders() },
-    );
+    const res = await this.http.post<{
+      order_tracking_id?: string;
+      merchant_reference?: string;
+      redirect_url?: string;
+    }>('/api/Transactions/SubmitOrderRequest', body, {
+      headers: await this.authHeaders(),
+    });
     return {
       orderTrackingId: String(res.data.order_tracking_id ?? ''),
       merchantReference: String(res.data.merchant_reference ?? p.reference),
@@ -111,7 +113,11 @@ export class PesapalClient {
 
   /** Status query — the backstop for a dropped IPN. */
   async getStatus(orderTrackingId: string): Promise<PesapalStatusResult> {
-    const res = await this.http.get('/api/Transactions/GetTransactionStatus', {
+    const res = await this.http.get<{
+      status_code?: string | number;
+      payment_status_description?: string;
+      confirmation_code?: string;
+    }>('/api/Transactions/GetTransactionStatus', {
       params: { orderTrackingId },
       headers: await this.authHeaders(),
     });
