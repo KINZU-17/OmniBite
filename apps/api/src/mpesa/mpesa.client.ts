@@ -57,14 +57,15 @@ export class MpesaClient {
     const secret = this.config.get<string>('MPESA_CONSUMER_SECRET', '');
     const basic = Buffer.from(`${key}:${secret}`).toString('base64');
 
-    const res = await this.http.get<{
-      access_token: string;
-      expires_in?: number;
-    }>('/oauth/v1/generate?grant_type=client_credentials', {
-      headers: { Authorization: `Basic ${basic}` },
-    });
-    const value = res.data.access_token;
-    const ttl = Number(res.data.expires_in ?? 3599) * 1000;
+    const res = await this.http.get(
+      '/oauth/v1/generate?grant_type=client_credentials',
+      {
+        headers: { Authorization: `Basic ${basic}` },
+      },
+    );
+    const body = res.data as Record<string, unknown>;
+    const value = String((body.access_token as string | undefined) ?? '');
+    const ttl = Number(body.expires_in ?? 3599) * 1000;
     this.token = { value, expiresAt: Date.now() + ttl };
     return value;
   }
@@ -102,14 +103,14 @@ export class MpesaClient {
       AccountReference: params.accountReference.slice(0, 12),
       TransactionDesc: params.description.slice(0, 13),
     };
-    const res = await this.http.post<{
+    const res = await this.http.post('/mpesa/stkpush/v1/processrequest', body, {
+      headers: await this.authHeaders(),
+    });
+    return res.data as {
       MerchantRequestID?: string;
       CheckoutRequestID?: string;
       ResponseCode?: string;
-    }>('/mpesa/stkpush/v1/processrequest', body, {
-      headers: await this.authHeaders(),
-    });
-    return res.data;
+    };
   }
 
   /** Status-query backstop for a dropped callback. */
@@ -123,13 +124,10 @@ export class MpesaClient {
       Timestamp: timestamp,
       CheckoutRequestID: checkoutRequestId,
     };
-    const res = await this.http.post<{
-      ResultCode?: string;
-      ResultDesc?: string;
-    }>('/mpesa/stkpushquery/v1/query', body, {
+    const res = await this.http.post('/mpesa/stkpushquery/v1/query', body, {
       headers: await this.authHeaders(),
     });
-    return res.data;
+    return res.data as { ResultCode?: string; ResultDesc?: string };
   }
 
   /** Reversal — operationally heavy; store credit is OmniBite's default remedy. */
@@ -160,6 +158,6 @@ export class MpesaClient {
     const res = await this.http.post('/mpesa/reversal/v1/request', body, {
       headers: await this.authHeaders(),
     });
-    return res.data;
+    return res.data as unknown;
   }
 }

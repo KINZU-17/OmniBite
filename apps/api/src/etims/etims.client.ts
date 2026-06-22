@@ -55,21 +55,23 @@ export class EtimsClient {
     }
     const endpoint =
       payload.docType === 'CREDIT_NOTE' ? '/credit-notes' : '/invoices';
-    const res = await this.http.post<{
-      invoiceNo?: string;
-      fiscalDocumentNumber?: string;
-      qrData?: string;
-      qrCode?: string;
-    }>(endpoint, payload, {
+    const res = await this.http.post(endpoint, payload, {
       headers: {
         Authorization: `Bearer ${this.config.get<string>('ETIMS_API_KEY', '')}`,
       },
     });
+    const body = res.data as Record<string, unknown>;
     return {
       invoiceNo: String(
-        res.data.invoiceNo ?? res.data.fiscalDocumentNumber ?? '',
+        (body.invoiceNo as string | undefined) ??
+          (body.fiscalDocumentNumber as string | undefined) ??
+          '',
       ),
-      qrData: String(res.data.qrData ?? res.data.qrCode ?? ''),
+      qrData: String(
+        (body.qrData as string | undefined) ??
+          (body.qrCode as string | undefined) ??
+          '',
+      ),
     };
   }
 }

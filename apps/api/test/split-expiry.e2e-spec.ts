@@ -37,8 +37,12 @@ describe('Split-payment window expiry', () => {
         phone: '254700000001',
       })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const aId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const aId: string = scanBody.participant.id;
 
     await api()
       .post(`/sessions/${sessionId}/join`)
@@ -51,7 +55,8 @@ describe('Split-payment window expiry', () => {
 
     // A orders Fries (350), B orders Soda (200).
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
-    const roundId: string = round.body.id;
+    const roundBody = round.body as { id: string };
+    const roundId: string = roundBody.id;
     await api()
       .post(`/rounds/${roundId}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId: aId, quantity: 1 })
@@ -72,7 +77,14 @@ describe('Split-payment window expiry', () => {
         ],
       })
       .expect(201);
-    const payA = submit.body.payments.find((p: any) => p.participantId === aId);
+    const submitBody = submit.body as {
+      payments: Array<{
+        id: string;
+        participantId: string;
+        amount: number | string;
+      }>;
+    };
+    const payA = submitBody.payments.find((p) => p.participantId === aId)!;
     expect(Number(payA.amount)).toBe(350);
 
     // Only A pays → round is PARTIALLY_PAID (B still owes).
@@ -80,7 +92,8 @@ describe('Split-payment window expiry', () => {
       .post(`/payments/${payA.id}/cash`)
       .set('x-staff-id', fx.staff.server.id)
       .expect(201);
-    expect(cash.body.fired).toBe(false);
+    const cashBody = cash.body as { fired: boolean };
+    expect(cashBody.fired).toBe(false);
     expect(
       (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
     ).toBe('PARTIALLY_PAID');

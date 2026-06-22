@@ -35,16 +35,22 @@ describe('86 after payment → auto-refund', () => {
         phone: '254700000444',
       })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const participantId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const participantId: string = scanBody.participant.id;
 
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
-    const roundId: string = round.body.id;
+    const roundBody = round.body as { id: string };
+    const roundId: string = roundBody.id;
     const add = await api()
       .post(`/rounds/${roundId}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId, quantity: 1 })
       .expect(201);
-    const roundItemId: string = add.body.id;
+    const addBody = add.body as { id: string };
+    const roundItemId: string = addBody.id;
 
     const submit = await api()
       .post(`/rounds/${roundId}/submit`)
@@ -53,7 +59,8 @@ describe('86 after payment → auto-refund', () => {
         payments: [{ participantId, method: 'CASH' }],
       })
       .expect(201);
-    const paymentId: string = submit.body.payments[0].id;
+    const submitBody = submit.body as { payments: Array<{ id: string }> };
+    const paymentId: string = submitBody.payments[0].id;
     await api()
       .post(`/payments/${paymentId}/cash`)
       .set('x-staff-id', fx.staff.server.id)

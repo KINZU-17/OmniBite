@@ -32,22 +32,28 @@ describe('Refund → credit note + store credit + audit', () => {
       .post('/sessions/scan')
       .send({ qrToken: fx.table.qrToken, displayName: 'Refund', phone })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const participantId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const participantId: string = scanBody.participant.id;
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
+    const roundBody = round.body as { id: string };
     await api()
-      .post(`/rounds/${round.body.id}/items`)
+      .post(`/rounds/${roundBody.id}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId, quantity: 1 })
       .expect(201);
     const submit = await api()
-      .post(`/rounds/${round.body.id}/submit`)
+      .post(`/rounds/${roundBody.id}/submit`)
       // Attach the participant so the refund has a phone to credit.
       .send({
         settlementMode: 'SINGLE_PAYER',
         payments: [{ participantId, method: 'CASH' }],
       })
       .expect(201);
-    const paymentId: string = submit.body.payments[0].id;
+    const submitBody = submit.body as { payments: Array<{ id: string }> };
+    const paymentId: string = submitBody.payments[0].id;
     await api()
       .post(`/payments/${paymentId}/cash`)
       .set('x-staff-id', fx.staff.server.id)
@@ -64,9 +70,14 @@ describe('Refund → credit note + store credit + audit', () => {
       .set('x-staff-id', mgr)
       .send({ paymentId, reasonCode: 'QUALITY' })
       .expect(201);
-    const refundId: string = req.body.id;
-    expect(req.body.status).toBe('REQUESTED');
-    expect(Number(req.body.amount)).toBe(350);
+    const reqBody = req.body as {
+      id: string;
+      status: string;
+      amount: number | string;
+    };
+    const refundId: string = reqBody.id;
+    expect(reqBody.status).toBe('REQUESTED');
+    expect(Number(reqBody.amount)).toBe(350);
 
     await api()
       .post(`/refunds/${refundId}/approve`)
@@ -77,7 +88,8 @@ describe('Refund → credit note + store credit + audit', () => {
       .set('x-staff-id', mgr)
       .send({ mode: 'CREDIT' })
       .expect(201);
-    expect(resolved.body.status).toBe('RESOLVED_CREDIT');
+    const resolvedBody = resolved.body as { status: string };
+    expect(resolvedBody.status).toBe('RESOLVED_CREDIT');
 
     // Credit note issued (PENDING until eTIMS is configured).
     const creditNotes = await prisma.etimsInvoice.findMany({

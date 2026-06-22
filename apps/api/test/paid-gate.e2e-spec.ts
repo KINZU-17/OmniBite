@@ -35,12 +35,17 @@ describe('PAID gate (pay-before-fire)', () => {
         phone: '254700000000',
       })
       .expect(201);
-    const sessionId: string = scan.body.sessionId;
-    const participantId: string = scan.body.participant.id;
+    const scanBody = scan.body as {
+      sessionId: string;
+      participant: { id: string };
+    };
+    const sessionId: string = scanBody.sessionId;
+    const participantId: string = scanBody.participant.id;
     expect(sessionId).toBeTruthy();
 
     const round = await api().post(`/sessions/${sessionId}/round`).expect(201);
-    const roundId: string = round.body.id;
+    const roundBody = round.body as { id: string };
+    const roundId: string = roundBody.id;
     await api()
       .post(`/rounds/${roundId}/items`)
       .send({ menuItemId: fx.items.fries.id, participantId, quantity: 2 })
@@ -53,7 +58,10 @@ describe('PAID gate (pay-before-fire)', () => {
         payments: [{ participantId, method: 'CASH' }],
       })
       .expect(201);
-    const payment = submit.body.payments[0];
+    const submitBody = submit.body as {
+      payments: Array<{ id: string; amount: number | string }>;
+    };
+    const payment = submitBody.payments[0];
     expect(Number(payment.amount)).toBe(700); // 2 × 350
 
     // INVARIANT 1: no ticket before payment.
@@ -69,7 +77,8 @@ describe('PAID gate (pay-before-fire)', () => {
       .post(`/payments/${payment.id}/cash`)
       .set('x-staff-id', fx.staff.server.id)
       .expect(201);
-    expect(cash.body.fired).toBe(true);
+    const cashBody = cash.body as { fired: boolean };
+    expect(cashBody.fired).toBe(true);
 
     expect(
       (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
@@ -101,7 +110,8 @@ describe('PAID gate (pay-before-fire)', () => {
       .post(`/payments/${payment.id}/cash`)
       .set('x-staff-id', fx.staff.server.id)
       .expect(201);
-    expect(cash2.body.fired).toBe(false);
+    const cash2Body = cash2.body as { fired: boolean };
+    expect(cash2Body.fired).toBe(false);
     expect(await prisma.kitchenTicket.count({ where: { roundId } })).toBe(1);
     expect(
       await prisma.etimsInvoice.count({
