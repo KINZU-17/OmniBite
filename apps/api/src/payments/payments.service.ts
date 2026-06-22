@@ -38,8 +38,8 @@ export class PaymentsService {
   async createForRound(roundId: string, dto: SubmitRoundDto) {
     const windowSec = this.config.get<number>('PAYMENT_WINDOW_SECONDS', 300);
 
-    const { payments, mpesaToInitiate, cardToInitiate, tableNumber } = await this.prisma.$transaction(
-      async (tx) => {
+    const { payments, mpesaToInitiate, cardToInitiate, tableNumber } =
+      await this.prisma.$transaction(async (tx) => {
         const round = await tx.round.findUnique({
           where: { id: roundId },
           include: {
@@ -49,7 +49,9 @@ export class PaymentsService {
         });
         if (!round) throw new NotFoundException('round not found');
         if (round.status !== RoundStatus.SUBMITTED) {
-          throw new BadRequestException(`round is ${round.status}, expected SUBMITTED`);
+          throw new BadRequestException(
+            `round is ${round.status}, expected SUBMITTED`,
+          );
         }
         if (round.items.length === 0) {
           throw new BadRequestException('round has no items to pay for');
@@ -71,7 +73,9 @@ export class PaymentsService {
 
         if (dto.settlementMode === SettlementMode.SINGLE_PAYER) {
           if (dto.payments.length !== 1) {
-            throw new BadRequestException('SINGLE_PAYER requires exactly one payment');
+            throw new BadRequestException(
+              'SINGLE_PAYER requires exactly one payment',
+            );
           }
           const inst = dto.payments[0];
           const amount = grandTotal.add(money(inst.tip ?? 0));
@@ -85,20 +89,32 @@ export class PaymentsService {
           });
           created.push(payment);
           if (inst.method === PaymentMethod.MPESA) {
-            const phone = this.resolvePhone(inst.phone, inst.participantId, round.session.participants);
+            const phone = this.resolvePhone(
+              inst.phone,
+              inst.participantId,
+              round.session.participants,
+            );
             toInitiate.push({ payment, phone });
           } else if (inst.method === PaymentMethod.CARD) {
             cardToInit.push({
               payment,
-              phone: this.optionalPhone(inst.phone, inst.participantId, round.session.participants),
+              phone: this.optionalPhone(
+                inst.phone,
+                inst.participantId,
+                round.session.participants,
+              ),
             });
           }
         } else {
           // SPLIT: every participant with items must have a payment instruction.
           for (const [participantId, itemTotal] of totals) {
-            const inst = dto.payments.find((p) => p.participantId === participantId);
+            const inst = dto.payments.find(
+              (p) => p.participantId === participantId,
+            );
             if (!inst) {
-              throw new BadRequestException(`missing payment for participant ${participantId}`);
+              throw new BadRequestException(
+                `missing payment for participant ${participantId}`,
+              );
             }
             const amount = itemTotal.add(money(inst.tip ?? 0));
             const payment = await tx.payment.create({
@@ -106,12 +122,20 @@ export class PaymentsService {
             });
             created.push(payment);
             if (inst.method === PaymentMethod.MPESA) {
-              const phone = this.resolvePhone(inst.phone, participantId, round.session.participants);
+              const phone = this.resolvePhone(
+                inst.phone,
+                participantId,
+                round.session.participants,
+              );
               toInitiate.push({ payment, phone });
             } else if (inst.method === PaymentMethod.CARD) {
               cardToInit.push({
                 payment,
-                phone: this.optionalPhone(inst.phone, participantId, round.session.participants),
+                phone: this.optionalPhone(
+                  inst.phone,
+                  participantId,
+                  round.session.participants,
+                ),
               });
             }
           }
@@ -134,8 +158,7 @@ export class PaymentsService {
           cardToInitiate: cardToInit,
           tableNumber: round.session.table.tableNumber,
         };
-      },
-    );
+      });
 
     // Fire STK pushes outside the transaction (network + their own writes).
     for (const { payment, phone } of mpesaToInitiate) {
@@ -145,7 +168,8 @@ export class PaymentsService {
     const cardRedirects: Array<{ paymentId: string; redirectUrl: string }> = [];
     for (const { payment, phone } of cardToInitiate) {
       const { redirectUrl } = await this.pesapal.initiate(payment, { phone });
-      if (redirectUrl) cardRedirects.push({ paymentId: payment.id, redirectUrl });
+      if (redirectUrl)
+        cardRedirects.push({ paymentId: payment.id, redirectUrl });
     }
     return { payments, cardRedirects };
   }
@@ -163,7 +187,10 @@ export class PaymentsService {
    * staff-operated fallback for a physical card terminal, where the reader
    * captures the charge and staff record its gateway ref + auth code by hand.
    */
-  async confirmCard(paymentId: string, dto: ConfirmCardDto): Promise<{ fired: boolean }> {
+  async confirmCard(
+    paymentId: string,
+    dto: ConfirmCardDto,
+  ): Promise<{ fired: boolean }> {
     const payment = await this.requirePayment(paymentId, PaymentMethod.CARD);
     if (payment.status === 'CONFIRMED') return { fired: false };
     await this.prisma.cardTransaction.upsert({
@@ -181,11 +208,19 @@ export class PaymentsService {
   async retryMpesa(paymentId: string, phone?: string): Promise<Payment> {
     const old = await this.prisma.payment.findUnique({
       where: { id: paymentId },
-      include: { round: { include: { session: { include: { table: true, participants: true } } } } },
+      include: {
+        round: {
+          include: {
+            session: { include: { table: true, participants: true } },
+          },
+        },
+      },
     });
     if (!old) throw new NotFoundException('payment not found');
     if (old.method !== PaymentMethod.MPESA) {
-      throw new BadRequestException('only M-Pesa payments are retried this way');
+      throw new BadRequestException(
+        'only M-Pesa payments are retried this way',
+      );
     }
     if (old.status !== 'FAILED') {
       throw new BadRequestException('only a FAILED payment can be retried');
@@ -199,8 +234,16 @@ export class PaymentsService {
         amount: old.amount,
       },
     });
-    const resolved = this.resolvePhone(phone, old.participantId, old.round.session.participants);
-    await this.mpesa.initiate(fresh, resolved, old.round.session.table.tableNumber);
+    const resolved = this.resolvePhone(
+      phone,
+      old.participantId,
+      old.round.session.participants,
+    );
+    await this.mpesa.initiate(
+      fresh,
+      resolved,
+      old.round.session.table.tableNumber,
+    );
     return fresh;
   }
 
@@ -209,8 +252,10 @@ export class PaymentsService {
     participantId: string | null | undefined,
     participants: { id: string; phone: string | null }[],
   ): string {
-    const phone = explicit ?? participants.find((p) => p.id === participantId)?.phone;
-    if (!phone) throw new BadRequestException('no phone number for M-Pesa payment');
+    const phone =
+      explicit ?? participants.find((p) => p.id === participantId)?.phone;
+    if (!phone)
+      throw new BadRequestException('no phone number for M-Pesa payment');
     return phone;
   }
 
@@ -220,14 +265,23 @@ export class PaymentsService {
     participantId: string | null | undefined,
     participants: { id: string; phone: string | null }[],
   ): string | undefined {
-    return explicit ?? participants.find((p) => p.id === participantId)?.phone ?? undefined;
+    return (
+      explicit ??
+      participants.find((p) => p.id === participantId)?.phone ??
+      undefined
+    );
   }
 
-  private async requirePayment(id: string, method: PaymentMethod): Promise<Payment> {
+  private async requirePayment(
+    id: string,
+    method: PaymentMethod,
+  ): Promise<Payment> {
     const payment = await this.prisma.payment.findUnique({ where: { id } });
     if (!payment) throw new NotFoundException('payment not found');
     if (payment.method !== method) {
-      throw new BadRequestException(`payment is ${payment.method}, expected ${method}`);
+      throw new BadRequestException(
+        `payment is ${payment.method}, expected ${method}`,
+      );
     }
     return payment;
   }

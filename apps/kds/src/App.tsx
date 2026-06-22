@@ -69,6 +69,13 @@ function Board({ config, onSignOut }: { config: KdsConfig; onSignOut: () => void
   const qc = useQueryClient();
   const [view, setView] = useState<'board' | 'agg'>('board');
   const [online, setOnline] = useState(true);
+  // A ticking clock so ticket ages stay live (and render stays pure — no
+  // Date.now() inside a component body).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const boardQuery = useQuery({
     queryKey: ['board'],
@@ -156,7 +163,7 @@ function Board({ config, onSignOut }: { config: KdsConfig; onSignOut: () => void
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {tickets.length === 0 && <p className="text-slate-400">No paid tickets yet.</p>}
           {tickets.map((t) => (
-            <TicketCard key={t.id} ticket={t} onStatus={setStatus} onServe={serve} onBump={bump} />
+            <TicketCard key={t.id} ticket={t} now={now} onStatus={setStatus} onServe={serve} onBump={bump} />
           ))}
         </div>
       )}
@@ -166,16 +173,18 @@ function Board({ config, onSignOut }: { config: KdsConfig; onSignOut: () => void
 
 function TicketCard({
   ticket,
+  now,
   onStatus,
   onServe,
   onBump,
 }: {
   ticket: Ticket;
+  now: number;
   onStatus: (id: string, status: string) => void;
   onServe: (id: string) => void;
   onBump: (id: string) => void;
 }) {
-  const mins = Math.floor((Date.now() - new Date(ticket.firedAt).getTime()) / 60000);
+  const mins = Math.floor((now - new Date(ticket.firedAt).getTime()) / 60000);
   return (
     <div className={`rounded-xl border-l-8 bg-slate-800 p-3 ${ageClasses(ticket.firedAt)}`}>
       <div className="mb-2 flex justify-between text-sm text-slate-400">

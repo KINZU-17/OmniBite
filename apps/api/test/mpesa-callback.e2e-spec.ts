@@ -49,7 +49,11 @@ describe('M-Pesa callback idempotency', () => {
     // Build a real round with one item via the API.
     const scan = await api()
       .post('/sessions/scan')
-      .send({ qrToken: fx.table.qrToken, displayName: 'Mia', phone: '254700000555' })
+      .send({
+        qrToken: fx.table.qrToken,
+        displayName: 'Mia',
+        phone: '254700000555',
+      })
       .expect(201);
     const sessionId: string = scan.body.sessionId;
     const participantId: string = scan.body.participant.id;
@@ -63,7 +67,13 @@ describe('M-Pesa callback idempotency', () => {
     // Stage the PENDING M-Pesa payment + STK transaction (what initiate() would write).
     const checkoutId = 'co-e2e-1';
     const payment = await prisma.payment.create({
-      data: { roundId, participantId, method: 'MPESA', amount: 350, status: 'PENDING' },
+      data: {
+        roundId,
+        participantId,
+        method: 'MPESA',
+        amount: 350,
+        status: 'PENDING',
+      },
     });
     await prisma.mpesaTransaction.create({
       data: {
@@ -85,17 +95,25 @@ describe('M-Pesa callback idempotency', () => {
       .send(callbackBody(checkoutId, 'RCPT123'))
       .expect(200);
 
-    expect((await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe(
-      'CONFIRMED',
-    );
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe('FIRED');
+    expect(
+      (await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } }))
+        .status,
+    ).toBe('CONFIRMED');
+    expect(
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('FIRED');
     expect(await prisma.kitchenTicket.count({ where: { roundId } })).toBe(1);
     expect(
-      await prisma.etimsInvoice.count({ where: { paymentId: payment.id, docType: 'INVOICE' } }),
+      await prisma.etimsInvoice.count({
+        where: { paymentId: payment.id, docType: 'INVOICE' },
+      }),
     ).toBe(1);
     expect(
-      (await prisma.mpesaTransaction.findUniqueOrThrow({ where: { checkoutRequestId: checkoutId } }))
-        .mpesaReceipt,
+      (
+        await prisma.mpesaTransaction.findUniqueOrThrow({
+          where: { checkoutRequestId: checkoutId },
+        })
+      ).mpesaReceipt,
     ).toBe('RCPT123');
 
     // Replayed callback → no double anything.
@@ -106,7 +124,9 @@ describe('M-Pesa callback idempotency', () => {
 
     expect(await prisma.kitchenTicket.count({ where: { roundId } })).toBe(1);
     expect(
-      await prisma.etimsInvoice.count({ where: { paymentId: payment.id, docType: 'INVOICE' } }),
+      await prisma.etimsInvoice.count({
+        where: { paymentId: payment.id, docType: 'INVOICE' },
+      }),
     ).toBe(1);
   });
 });

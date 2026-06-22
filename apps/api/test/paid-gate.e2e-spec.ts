@@ -29,7 +29,11 @@ describe('PAID gate (pay-before-fire)', () => {
   it('fires only after payment, idempotently, then auto-settles on serve', async () => {
     const scan = await api()
       .post('/sessions/scan')
-      .send({ qrToken: fx.table.qrToken, displayName: 'E2E', phone: '254700000000' })
+      .send({
+        qrToken: fx.table.qrToken,
+        displayName: 'E2E',
+        phone: '254700000000',
+      })
       .expect(201);
     const sessionId: string = scan.body.sessionId;
     const participantId: string = scan.body.participant.id;
@@ -44,13 +48,18 @@ describe('PAID gate (pay-before-fire)', () => {
 
     const submit = await api()
       .post(`/rounds/${roundId}/submit`)
-      .send({ settlementMode: 'SINGLE_PAYER', payments: [{ participantId, method: 'CASH' }] })
+      .send({
+        settlementMode: 'SINGLE_PAYER',
+        payments: [{ participantId, method: 'CASH' }],
+      })
       .expect(201);
     const payment = submit.body.payments[0];
     expect(Number(payment.amount)).toBe(700); // 2 × 350
 
     // INVARIANT 1: no ticket before payment.
-    expect(await prisma.kitchenTicket.findUnique({ where: { roundId } })).toBeNull();
+    expect(
+      await prisma.kitchenTicket.findUnique({ where: { roundId } }),
+    ).toBeNull();
     expect(
       (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
     ).toBe('AWAITING_PAYMENT');
@@ -62,7 +71,9 @@ describe('PAID gate (pay-before-fire)', () => {
       .expect(201);
     expect(cash.body.fired).toBe(true);
 
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe('FIRED');
+    expect(
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('FIRED');
     const ticket = await prisma.kitchenTicket.findUnique({
       where: { roundId },
       include: { lines: true },
@@ -78,7 +89,11 @@ describe('PAID gate (pay-before-fire)', () => {
     expect(invoices[0].status).toBe('PENDING');
 
     expect(
-      (await prisma.restaurantTable.findUniqueOrThrow({ where: { id: fx.table.id } })).floorState,
+      (
+        await prisma.restaurantTable.findUniqueOrThrow({
+          where: { id: fx.table.id },
+        })
+      ).floorState,
     ).toBe('PAID');
 
     // Idempotency: a replayed confirm must not re-fire or duplicate.
@@ -89,7 +104,9 @@ describe('PAID gate (pay-before-fire)', () => {
     expect(cash2.body.fired).toBe(false);
     expect(await prisma.kitchenTicket.count({ where: { roundId } })).toBe(1);
     expect(
-      await prisma.etimsInvoice.count({ where: { paymentId: payment.id, docType: 'INVOICE' } }),
+      await prisma.etimsInvoice.count({
+        where: { paymentId: payment.id, docType: 'INVOICE' },
+      }),
     ).toBe(1);
 
     // Serve → SERVED and the session auto-settles (invariant 6 path).
@@ -97,9 +114,15 @@ describe('PAID gate (pay-before-fire)', () => {
       .post(`/kitchen/tickets/${ticket!.id}/serve`)
       .set('x-staff-id', fx.staff.kitchen.id)
       .expect(201);
-    expect((await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status).toBe('SERVED');
     expect(
-      (await prisma.tableSession.findUniqueOrThrow({ where: { id: sessionId } })).status,
+      (await prisma.round.findUniqueOrThrow({ where: { id: roundId } })).status,
+    ).toBe('SERVED');
+    expect(
+      (
+        await prisma.tableSession.findUniqueOrThrow({
+          where: { id: sessionId },
+        })
+      ).status,
     ).toBe('SETTLED');
   });
 });

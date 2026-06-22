@@ -1,13 +1,46 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Events } from '@omnibite/shared';
 import { api } from '../lib/api';
 import { connectGuest } from '../lib/socket';
-import { loadCtx, saveCtx } from '../lib/storage';
-import type { MenuItem, Round, Session } from '../types';
+import { loadCtx, saveCardReturn, saveCtx } from '../lib/storage';
+import type { MenuItem, PaymentMethod, Round, Session, SubmitResult } from '../types';
 
 const kes = (v: string | number) => `KES ${Number(v).toLocaleString('en-KE')}`;
+
+// Spec: "Items carry photos, descriptions, price, and dietary and allergen tags."
+// We render menu_items.photo_url; when an item has none yet, fall back to a food
+// photo matched to its name/category so the menu never shows an empty tile.
+const PHOTO_KEYWORDS: Array<[RegExp, string]> = [
+  [/burger/, 'burger'],
+  [/chicken/, 'chicken'],
+  [/fries|chips/, 'fries'],
+  [/salad/, 'salad'],
+  [/soda|cola|juice|drink|water/, 'drink'],
+  [/pizza/, 'pizza'],
+  [/coffee|tea|latte/, 'coffee'],
+  [/rice|pilau|biryani/, 'rice'],
+  [/fish/, 'fish'],
+];
+function photoFor(item: { name: string; category?: string | null; photoUrl?: string | null }): string {
+  if (item.photoUrl) return item.photoUrl;
+  const hay = `${item.name} ${item.category ?? ''}`.toLowerCase();
+  const query = PHOTO_KEYWORDS.find(([re]) => re.test(hay))?.[1] ?? (item.category ?? 'food').toLowerCase().split(/\s+/)[0];
+  // Lock the image to the item name so it stays stable across reloads.
+  const lock = Math.abs([...item.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 1000;
+  return `https://loremflickr.com/600/400/${encodeURIComponent(query)}?lock=${lock}`;
+}
+
+// Neutral tile shown if even the fallback photo fails to load (offline, blocked).
+const PHOTO_PLACEHOLDER =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="100%" height="100%" fill="#ccfbf1"/><text x="50%" y="50%" font-family="sans-serif" font-size="32" fill="#0f766e" text-anchor="middle" dominant-baseline="middle">OmniBite</text></svg>',
+  );
+const onPhotoError = (e: SyntheticEvent<HTMLImageElement>) => {
+  if (e.currentTarget.src !== PHOTO_PLACEHOLDER) e.currentTarget.src = PHOTO_PLACEHOLDER;
+};
 
 const TRACK_LABEL: Record<string, string> = {
   AWAITING_PAYMENT: 'Waiting for payment',
@@ -27,6 +60,9 @@ export function SessionPage() {
   const queryClient = useQueryClient();
   const [ctx, setCtx] = useState(() => (sessionId ? loadCtx(sessionId) : null));
   const [phone, setPhone] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('MPESA');
+  const [search, setSearch] = useState('');
+  const [tipPct, setTipPct] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,6 +103,20 @@ export function SessionPage() {
     );
   }, [session]);
 
+  // Filter by the search box, then group the menu under its category headings.
+  const menuByCategory = useMemo<Array<[string, MenuItem[]]>>(() => {
+    const q = search.trim().toLowerCase();
+    const items = (menuQuery.data ?? []).filter((it) =>
+      q ? `${it.name} ${it.description ?? ''} ${it.category ?? ''}`.toLowerCase().includes(q) : true,
+    );
+    const groups = new Map<string, MenuItem[]>();
+    for (const it of items) {
+      const cat = it.category ?? 'Other';
+      (groups.get(cat) ?? groups.set(cat, []).get(cat)!).push(it);
+    }
+    return [...groups.entries()];
+  }, [menuQuery.data, search]);
+
   async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError(null);
@@ -80,7 +130,7 @@ export function SessionPage() {
     }
   }
 
-  async function addItem(item: MenuItem, modifierIds: string[]) {
+  async function addItem(item: MenuItem, modifierIds: string[], quantity: number, notes: string) {
     if (!ctx) return;
     await run(async () => {
       let roundId = buildingRound?.id;
@@ -90,7 +140,13 @@ export function SessionPage() {
       }
       await api(`/rounds/${roundId}/items`, {
         method: 'POST',
-        body: JSON.stringify({ menuItemId: item.id, participantId: ctx.participantId, quantity: 1, modifierIds }),
+        body: JSON.stringify({
+          menuItemId: item.id,
+          participantId: ctx.participantId,
+          quantity,
+          modifierIds,
+          notes: notes.trim() || undefined,
+        }),
       });
     });
   }
@@ -101,20 +157,31 @@ export function SessionPage() {
   }
 
   async function submit() {
-    if (!buildingRound || !ctx) return;
-    if (!phone) {
+    if (!buildingRound || !ctx || !sessionId) return;
+    if (method === 'MPESA' && !phone) {
       setError('Enter your M-Pesa phone number to pay.');
       return;
     }
-    await run(() =>
-      api(`/rounds/${buildingRound.id}/submit`, {
+    const subtotal = buildingRound.items.reduce((a, i) => a + Number(i.lineTotal), 0);
+    const tip = tipPct ? ((subtotal * tipPct) / 100).toFixed(2) : undefined;
+    await run(async () => {
+      const res = await api<SubmitResult>(`/rounds/${buildingRound.id}/submit`, {
         method: 'POST',
         body: JSON.stringify({
           settlementMode: 'SINGLE_PAYER',
-          payments: [{ participantId: ctx.participantId, method: 'MPESA', phone }],
+          payments: [{ participantId: ctx.participantId, method, phone: phone || undefined, tip }],
         }),
-      }).then(() => undefined),
-    );
+      });
+      if (method === 'CARD') {
+        const redirect = res.cardRedirects?.[0]?.redirectUrl;
+        if (!redirect) {
+          throw new Error('Could not open card checkout. Please try again or pay with M-Pesa.');
+        }
+        // Leave the app for Pesapal's hosted checkout; come back via /card/return.
+        saveCardReturn(sessionId);
+        window.location.assign(redirect);
+      }
+    });
   }
 
   async function retry(paymentId: string) {
@@ -138,11 +205,29 @@ export function SessionPage() {
 
       {menuQuery.isLoading && <p>Loading menu…</p>}
       {menuQuery.data && (
-        <section className="space-y-3">
-          {menuQuery.data.map((item) => (
-            <MenuCard key={item.id} item={item} onAdd={addItem} disabled={busy} />
+        <>
+          <input
+            className="mb-3 w-full rounded-lg border border-slate-300 p-2 text-sm"
+            placeholder="Search the menu…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {menuByCategory.length === 0 && (
+            <p className="text-sm text-slate-500">No items match “{search}”.</p>
+          )}
+          {menuByCategory.map(([category, items]) => (
+            <section key={category} className="mb-4">
+              <h2 className="sticky top-0 z-10 -mx-4 mb-2 bg-slate-50/95 px-4 py-1 text-sm font-semibold uppercase tracking-wide text-slate-500 backdrop-blur">
+                {category}
+              </h2>
+              <div className="space-y-3">
+                {items.map((item) => (
+                  <MenuCard key={item.id} item={item} onAdd={addItem} disabled={busy} />
+                ))}
+              </div>
+            </section>
           ))}
-        </section>
+        </>
       )}
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -152,6 +237,10 @@ export function SessionPage() {
           round={buildingRound}
           phone={phone}
           setPhone={setPhone}
+          method={method}
+          setMethod={setMethod}
+          tipPct={tipPct}
+          setTipPct={setTipPct}
           onRemove={removeItem}
           onSubmit={submit}
           busy={busy}
@@ -194,13 +283,52 @@ function JoinPrompt({ sessionId, onJoined }: { sessionId: string; onJoined: (c: 
   );
 }
 
-function MenuCard({ item, onAdd, disabled }: { item: MenuItem; onAdd: (i: MenuItem, m: string[]) => void; disabled: boolean }) {
+function MenuCard({
+  item,
+  onAdd,
+  disabled,
+}: {
+  item: MenuItem;
+  onAdd: (i: MenuItem, m: string[], quantity: number, notes: string) => void;
+  disabled: boolean;
+}) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [qty, setQty] = useState(1);
+  const [notes, setNotes] = useState('');
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  // Unit price = base + the selected modifiers; line price = unit × quantity.
+  const modTotal = item.modifierGroups
+    .flatMap(({ modifierGroup }) => modifierGroup.modifiers)
+    .filter((m) => selected.includes(m.id))
+    .reduce((a, m) => a + Number(m.priceDelta), 0);
+  const lineTotal = (Number(item.basePrice) + modTotal) * qty;
+
+  const add = () => {
+    onAdd(item, selected, qty, notes);
+    setSelected([]);
+    setQty(1);
+    setNotes('');
+  };
+
   return (
-    <div className={`rounded-xl border bg-white p-4 shadow-sm ${item.is86 ? 'opacity-40' : ''}`}>
+    <div className={`overflow-hidden rounded-xl border bg-white shadow-sm ${item.is86 ? 'opacity-40' : ''}`}>
+      <div className="relative">
+        <img
+          src={photoFor(item)}
+          alt={item.name}
+          loading="lazy"
+          onError={onPhotoError}
+          className="h-40 w-full object-cover"
+        />
+        {item.is86 && (
+          <span className="absolute right-2 top-2 rounded bg-black/70 px-2 py-0.5 text-xs font-semibold text-white">
+            Out of stock
+          </span>
+        )}
+      </div>
+      <div className="p-4">
       <div className="flex justify-between">
         <div>
           <h3 className="font-semibold">{item.name}</h3>
@@ -227,13 +355,47 @@ function MenuCard({ item, onAdd, disabled }: { item: MenuItem; onAdd: (i: MenuIt
         </div>
       ))}
 
-      <button
-        className="mt-3 rounded-lg bg-teal-50 px-3 py-1.5 text-sm font-semibold text-teal-700 disabled:opacity-50"
-        disabled={item.is86 || disabled}
-        onClick={() => onAdd(item, selected)}
-      >
-        {item.is86 ? 'Out of stock' : 'Add to order'}
-      </button>
+      {!item.is86 && (
+        <input
+          className="mt-3 w-full rounded-lg border border-slate-200 p-2 text-sm"
+          placeholder="Special instructions (e.g. no ice)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      )}
+
+      <div className="mt-3 flex items-center gap-3">
+        {!item.is86 && (
+          <div className="flex items-center rounded-lg border border-slate-200">
+            <button
+              type="button"
+              className="px-3 py-1.5 text-lg font-semibold text-slate-600 disabled:opacity-40"
+              disabled={qty <= 1}
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              aria-label="Decrease quantity"
+            >
+              −
+            </button>
+            <span className="w-6 text-center text-sm font-semibold">{qty}</span>
+            <button
+              type="button"
+              className="px-3 py-1.5 text-lg font-semibold text-slate-600"
+              onClick={() => setQty((q) => q + 1)}
+              aria-label="Increase quantity"
+            >
+              +
+            </button>
+          </div>
+        )}
+        <button
+          className="flex-1 rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          disabled={item.is86 || disabled}
+          onClick={add}
+        >
+          {item.is86 ? 'Out of stock' : `Add ${qty} · ${kes(lineTotal)}`}
+        </button>
+      </div>
+      </div>
     </div>
   );
 }
@@ -242,6 +404,10 @@ function CartBar({
   round,
   phone,
   setPhone,
+  method,
+  setMethod,
+  tipPct,
+  setTipPct,
   onRemove,
   onSubmit,
   busy,
@@ -249,17 +415,29 @@ function CartBar({
   round: Round;
   phone: string;
   setPhone: (v: string) => void;
+  method: PaymentMethod;
+  setMethod: (m: PaymentMethod) => void;
+  tipPct: number;
+  setTipPct: (p: number) => void;
   onRemove: (id: string) => void;
   onSubmit: () => void;
   busy: boolean;
 }) {
-  const total = round.items.reduce((acc, i) => acc + Number(i.lineTotal), 0);
+  const subtotal = round.items.reduce((acc, i) => acc + Number(i.lineTotal), 0);
+  const tip = (subtotal * tipPct) / 100;
+  const total = subtotal + tip;
   return (
     <div className="fixed inset-x-0 bottom-0 mx-auto max-w-md border-t bg-white p-4 shadow-2xl">
       <div className="mb-2 max-h-28 space-y-1 overflow-auto">
         {round.items.map((i) => (
-          <div key={i.id} className="flex justify-between text-sm">
-            <span>
+          <div key={i.id} className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <img
+                src={photoFor(i.menuItem)}
+                alt=""
+                onError={onPhotoError}
+                className="h-9 w-9 rounded-md object-cover"
+              />
               {i.quantity}× {i.menuItem.name}
             </span>
             <span className="flex items-center gap-2">
@@ -271,19 +449,71 @@ function CartBar({
           </div>
         ))}
       </div>
-      <input
-        className="mb-2 w-full rounded-lg border border-slate-300 p-2 text-sm"
-        placeholder="M-Pesa phone e.g. 2547…"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-      />
+
+      <div className="mb-2">
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+          <span>Add a tip?</span>
+          {tipPct > 0 && <span>+{kes(tip)}</span>}
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {[0, 5, 10, 15].map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setTipPct(p)}
+              className={`rounded-lg border py-1.5 text-sm font-semibold ${
+                tipPct === p ? 'border-teal-600 bg-teal-50 text-teal-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              {p === 0 ? 'None' : `${p}%`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-2 flex justify-between border-t pt-2 text-sm">
+        <span className="text-slate-500">Total</span>
+        <span className="font-semibold">{kes(total)}</span>
+      </div>
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        {(['MPESA', 'CARD'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMethod(m)}
+            className={`rounded-lg border p-2 text-sm font-semibold ${
+              method === m
+                ? 'border-teal-600 bg-teal-50 text-teal-700'
+                : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            {m === 'MPESA' ? 'M-Pesa' : 'Card'}
+          </button>
+        ))}
+      </div>
+
+      {method === 'MPESA' && (
+        <input
+          className="mb-2 w-full rounded-lg border border-slate-300 p-2 text-sm"
+          placeholder="M-Pesa phone e.g. 2547…"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+        />
+      )}
+
       <button
         className="w-full rounded-lg bg-teal-600 p-3 font-semibold text-white disabled:opacity-50"
         disabled={busy}
         onClick={onSubmit}
       >
-        Pay {kes(total)} with M-Pesa
+        {method === 'MPESA' ? `Pay ${kes(total)} with M-Pesa` : `Pay ${kes(total)} by card`}
       </button>
+      {method === 'CARD' && (
+        <p className="mt-1 text-center text-xs text-slate-400">
+          You'll be taken to a secure card page, then back here.
+        </p>
+      )}
     </div>
   );
 }
@@ -301,18 +531,26 @@ function Tracking({
 }) {
   const ticketStatus = round.kitchenTicket?.status;
   const label = ticketStatus ? TICKET_LABEL[ticketStatus] : TRACK_LABEL[round.status] ?? round.status;
-  const failed = round.payments.filter((p) => p.status === 'FAILED');
-  const pending = round.payments.some((p) => ['INITIATED', 'PENDING'].includes(p.status));
+  // Retry is the M-Pesa STK path only; a failed card payment is re-paid by ordering again.
+  const failedMpesa = round.payments.filter((p) => p.status === 'FAILED' && p.method === 'MPESA');
+  const failedCard = round.payments.some((p) => p.status === 'FAILED' && p.method === 'CARD');
+  const pendingMpesa = round.payments.some(
+    (p) => p.method === 'MPESA' && ['INITIATED', 'PENDING'].includes(p.status),
+  );
+  const pendingCard = round.payments.some((p) => p.method === 'CARD' && p.status === 'PENDING');
 
   return (
     <section className="mb-4 rounded-xl border border-teal-200 bg-teal-50 p-4">
       <p className="text-sm font-medium text-teal-800">Your order</p>
       <p className="mt-1 text-lg font-bold text-teal-900">{label}</p>
-      {pending && <p className="mt-1 text-sm text-teal-700">Check your phone for the M-Pesa PIN prompt…</p>}
-      {failed.length > 0 && (
+      {pendingMpesa && (
+        <p className="mt-1 text-sm text-teal-700">Check your phone for the M-Pesa PIN prompt…</p>
+      )}
+      {pendingCard && <p className="mt-1 text-sm text-teal-700">Confirming your card payment…</p>}
+      {failedMpesa.length > 0 && (
         <div className="mt-2">
           <p className="text-sm text-red-600">Payment failed.</p>
-          {failed.map((p) => (
+          {failedMpesa.map((p) => (
             <button
               key={p.id}
               disabled={busy || !phone}
@@ -323,6 +561,11 @@ function Tracking({
             </button>
           ))}
         </div>
+      )}
+      {failedCard && (
+        <p className="mt-2 text-sm text-red-600">
+          Card payment didn't go through. Add your items again to retry.
+        </p>
       )}
     </section>
   );

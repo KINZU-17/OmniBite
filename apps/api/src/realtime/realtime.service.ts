@@ -26,7 +26,11 @@ export class RealtimeService {
       },
     });
     if (ticket) {
-      this.gateway.emit(Rooms.kitchen(evt.locationId), Events.TICKET_FIRED, ticket);
+      this.gateway.emit(
+        Rooms.kitchen(evt.locationId),
+        Events.TICKET_FIRED,
+        ticket,
+      );
     }
     this.emitTableState(evt.locationId, evt.tableId, 'PAID');
   }
@@ -43,10 +47,16 @@ export class RealtimeService {
 
   /** 86 changes go to the floor and to live diner menus (both in the floor room). */
   emitItem86(locationId: string, menuItemId: string, is86: boolean): void {
-    this.gateway.emit(Rooms.floor(locationId), Events.ITEM_86, { menuItemId, is86 });
+    this.gateway.emit(Rooms.floor(locationId), Events.ITEM_86, {
+      menuItemId,
+      is86,
+    });
   }
 
   emitTableState(locationId: string, tableId: string, state: string): void {
-    this.gateway.emit(Rooms.floor(locationId), Events.TABLE_STATE, { tableId, state });
+    this.gateway.emit(Rooms.floor(locationId), Events.TABLE_STATE, {
+      tableId,
+      state,
+    });
   }
 }

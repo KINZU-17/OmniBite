@@ -11,6 +11,19 @@ interface MetaItem {
   Value?: string | number;
 }
 
+/** The Daraja STK callback shape (the fields we read). */
+interface StkCallback {
+  CheckoutRequestID?: string;
+  MerchantRequestID?: string;
+  ResultCode?: string | number;
+  ResultDesc?: string;
+  CallbackMetadata?: { Item?: MetaItem[] };
+}
+interface StkCallbackBody {
+  Body?: { stkCallback?: StkCallback };
+  stkCallback?: StkCallback;
+}
+
 @Injectable()
 export class MpesaService {
   private readonly logger = new Logger(MpesaService.name);
@@ -27,7 +40,11 @@ export class MpesaService {
    * moves INITIATED -> PENDING and an mpesa_transactions row records the checkout
    * id. The customer now sees the PIN prompt; nothing fires until the callback.
    */
-  async initiate(payment: Payment, phone: string, accountReference: string): Promise<void> {
+  async initiate(
+    payment: Payment,
+    phone: string,
+    accountReference: string,
+  ): Promise<void> {
     let res;
     try {
       res = await this.client.stkPush({
@@ -37,13 +54,18 @@ export class MpesaService {
         description: 'OmniBite',
       });
     } catch (err) {
-      this.logger.error(`STK push failed for payment ${payment.id}: ${String(err)}`);
+      this.logger.error(
+        `STK push failed for payment ${payment.id}: ${String(err)}`,
+      );
       await this.settlement.failPayment(payment.id, 'STK push request failed');
       return;
     }
 
     if (res.ResponseCode !== '0' || !res.CheckoutRequestID) {
-      await this.settlement.failPayment(payment.id, `STK not accepted: ${res.ResponseCode}`);
+      await this.settlement.failPayment(
+        payment.id,
+        `STK not accepted: ${res.ResponseCode}`,
+      );
       return;
     }
 
@@ -68,9 +90,11 @@ export class MpesaService {
    * Daraja callback — the source of truth. Idempotent on the M-Pesa receipt so a
    * replayed callback never double-confirms. Caller must ack with 200 quickly.
    */
-  async handleCallback(body: any): Promise<void> {
-    const cb = body?.Body?.stkCallback ?? body?.stkCallback ?? body;
-    const checkoutRequestId: string | undefined = cb?.CheckoutRequestID;
+  async handleCallback(body: unknown): Promise<void> {
+    const root = (body ?? {}) as StkCallbackBody;
+    const cb: StkCallback =
+      root.Body?.stkCallback ?? root.stkCallback ?? (root as StkCallback);
+    const checkoutRequestId = cb.CheckoutRequestID;
     if (!checkoutRequestId) {
       this.logger.warn('callback without CheckoutRequestID, ignoring');
       return;
@@ -118,7 +142,10 @@ export class MpesaService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async reapPending(): Promise<void> {
-    const timeoutSec = this.config.get<number>('MPESA_STATUS_TIMEOUT_SECONDS', 120);
+    const timeoutSec = this.config.get<number>(
+      'MPESA_STATUS_TIMEOUT_SECONDS',
+      120,
+    );
     const cutoff = new Date(Date.now() - timeoutSec * 1000);
 
     const stale = await this.prisma.payment.findMany({
@@ -152,7 +179,9 @@ export class MpesaService {
           });
         }
       } catch (err) {
-        this.logger.warn(`status query failed for ${payment.id}: ${String(err)}`);
+        this.logger.warn(
+          `status query failed for ${payment.id}: ${String(err)}`,
+        );
       }
     }
   }

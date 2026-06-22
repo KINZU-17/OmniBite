@@ -50,13 +50,21 @@ export class PesapalService {
         phone: opts.phone,
       });
     } catch (err) {
-      this.logger.error(`Pesapal submit failed for payment ${payment.id}: ${String(err)}`);
-      await this.settlement.failPayment(payment.id, 'Pesapal order request failed');
+      this.logger.error(
+        `Pesapal submit failed for payment ${payment.id}: ${String(err)}`,
+      );
+      await this.settlement.failPayment(
+        payment.id,
+        'Pesapal order request failed',
+      );
       return { redirectUrl: null };
     }
 
     if (!res.orderTrackingId || !res.redirectUrl) {
-      await this.settlement.failPayment(payment.id, 'Pesapal returned no redirect');
+      await this.settlement.failPayment(
+        payment.id,
+        'Pesapal returned no redirect',
+      );
       return { redirectUrl: null };
     }
 
@@ -89,19 +97,30 @@ export class PesapalService {
       this.logger.warn(`IPN for unknown order ${orderTrackingId}`);
       return;
     }
-    const payment = await this.prisma.payment.findUnique({ where: { id: txn.paymentId } });
-    if (!payment || payment.status === 'CONFIRMED' || payment.status === 'FAILED') {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: txn.paymentId },
+    });
+    if (
+      !payment ||
+      payment.status === 'CONFIRMED' ||
+      payment.status === 'FAILED'
+    ) {
       return; // already resolved
     }
     await this.resolve(orderTrackingId, txn.paymentId);
   }
 
-  private async resolve(orderTrackingId: string, paymentId: string): Promise<void> {
+  private async resolve(
+    orderTrackingId: string,
+    paymentId: string,
+  ): Promise<void> {
     let res;
     try {
       res = await this.client.getStatus(orderTrackingId);
     } catch (err) {
-      this.logger.warn(`status query failed for ${orderTrackingId}: ${String(err)}`);
+      this.logger.warn(
+        `status query failed for ${orderTrackingId}: ${String(err)}`,
+      );
       return;
     }
     await this.prisma.cardTransaction.update({
@@ -129,7 +148,10 @@ export class PesapalService {
   @Cron(CronExpression.EVERY_MINUTE)
   async reapPending(): Promise<void> {
     if (!this.client.configured) return;
-    const timeoutSec = this.config.get<number>('PESAPAL_STATUS_TIMEOUT_SECONDS', 180);
+    const timeoutSec = this.config.get<number>(
+      'PESAPAL_STATUS_TIMEOUT_SECONDS',
+      180,
+    );
     const cutoff = new Date(Date.now() - timeoutSec * 1000);
 
     const stale = await this.prisma.payment.findMany({

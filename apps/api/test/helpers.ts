@@ -69,7 +69,12 @@ export async function seedFixtures(prisma: PrismaService) {
 
   const mkStaff = (role: StaffRole) =>
     prisma.staff.create({
-      data: { locationId: location.id, name: `${role} Test`, role, pinHash: 'test' },
+      data: {
+        locationId: location.id,
+        name: `${role} Test`,
+        role,
+        pinHash: 'test',
+      },
     });
   const [admin, manager, server, kitchen] = await Promise.all([
     mkStaff('ADMIN'),

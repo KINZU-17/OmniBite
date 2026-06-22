@@ -72,9 +72,18 @@ describe('MpesaService.handleCallback', () => {
       mpesaReceipt: null,
     });
     await service.handleCallback({
-      Body: { stkCallback: { CheckoutRequestID: 'co-2', ResultCode: 1032, ResultDesc: 'Cancelled by user' } },
+      Body: {
+        stkCallback: {
+          CheckoutRequestID: 'co-2',
+          ResultCode: 1032,
+          ResultDesc: 'Cancelled by user',
+        },
+      },
     });
-    expect(settlement.failPayment).toHaveBeenCalledWith('pay-2', 'Cancelled by user');
+    expect(settlement.failPayment).toHaveBeenCalledWith(
+      'pay-2',
+      'Cancelled by user',
+    );
   });
 
   it('ignores a callback for an unknown checkout id', async () => {

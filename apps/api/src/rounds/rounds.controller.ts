@@ -1,10 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
 import { RoundsService } from './rounds.service';
 import { AddItemDto } from './dto';
 import { SubmitRoundDto } from '../payments/dto';

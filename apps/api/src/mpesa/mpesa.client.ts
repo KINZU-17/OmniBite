@@ -18,7 +18,10 @@ export class MpesaClient {
 
   constructor(private readonly config: ConfigService) {
     this.http = axios.create({
-      baseURL: this.config.get<string>('MPESA_BASE_URL', 'https://sandbox.safaricom.co.ke'),
+      baseURL: this.config.get<string>(
+        'MPESA_BASE_URL',
+        'https://sandbox.safaricom.co.ke',
+      ),
       timeout: 30_000,
     });
   }
@@ -41,7 +44,9 @@ export class MpesaClient {
   }
 
   private password(timestamp: string): string {
-    return Buffer.from(`${this.shortcode}${this.passkey}${timestamp}`).toString('base64');
+    return Buffer.from(`${this.shortcode}${this.passkey}${timestamp}`).toString(
+      'base64',
+    );
   }
 
   async getToken(): Promise<string> {
@@ -52,10 +57,13 @@ export class MpesaClient {
     const secret = this.config.get<string>('MPESA_CONSUMER_SECRET', '');
     const basic = Buffer.from(`${key}:${secret}`).toString('base64');
 
-    const res = await this.http.get('/oauth/v1/generate?grant_type=client_credentials', {
+    const res = await this.http.get<{
+      access_token: string;
+      expires_in?: number;
+    }>('/oauth/v1/generate?grant_type=client_credentials', {
       headers: { Authorization: `Basic ${basic}` },
     });
-    const value = res.data.access_token as string;
+    const value = res.data.access_token;
     const ttl = Number(res.data.expires_in ?? 3599) * 1000;
     this.token = { value, expiresAt: Date.now() + ttl };
     return value;
@@ -71,9 +79,16 @@ export class MpesaClient {
     phone: string;
     accountReference: string;
     description: string;
-  }): Promise<{ MerchantRequestID?: string; CheckoutRequestID?: string; ResponseCode?: string }> {
+  }): Promise<{
+    MerchantRequestID?: string;
+    CheckoutRequestID?: string;
+    ResponseCode?: string;
+  }> {
     const timestamp = this.timestamp();
-    const txType = this.config.get<string>('MPESA_TX_TYPE', 'CustomerPayBillOnline');
+    const txType = this.config.get<string>(
+      'MPESA_TX_TYPE',
+      'CustomerPayBillOnline',
+    );
     const body = {
       BusinessShortCode: this.shortcode,
       Password: this.password(timestamp),
@@ -87,7 +102,11 @@ export class MpesaClient {
       AccountReference: params.accountReference.slice(0, 12),
       TransactionDesc: params.description.slice(0, 13),
     };
-    const res = await this.http.post('/mpesa/stkpush/v1/processrequest', body, {
+    const res = await this.http.post<{
+      MerchantRequestID?: string;
+      CheckoutRequestID?: string;
+      ResponseCode?: string;
+    }>('/mpesa/stkpush/v1/processrequest', body, {
       headers: await this.authHeaders(),
     });
     return res.data;
@@ -104,7 +123,10 @@ export class MpesaClient {
       Timestamp: timestamp,
       CheckoutRequestID: checkoutRequestId,
     };
-    const res = await this.http.post('/mpesa/stkpushquery/v1/query', body, {
+    const res = await this.http.post<{
+      ResultCode?: string;
+      ResultDesc?: string;
+    }>('/mpesa/stkpushquery/v1/query', body, {
       headers: await this.authHeaders(),
     });
     return res.data;
@@ -118,14 +140,20 @@ export class MpesaClient {
   }): Promise<unknown> {
     const body = {
       Initiator: this.config.get<string>('MPESA_INITIATOR', ''),
-      SecurityCredential: this.config.get<string>('MPESA_SECURITY_CREDENTIAL', ''),
+      SecurityCredential: this.config.get<string>(
+        'MPESA_SECURITY_CREDENTIAL',
+        '',
+      ),
       CommandID: 'TransactionReversal',
       TransactionID: params.transactionId,
       Amount: params.amount,
       ReceiverParty: params.receiver,
       RecieverIdentifierType: '11',
       ResultURL: this.config.get<string>('MPESA_REVERSAL_RESULT_URL', ''),
-      QueueTimeOutURL: this.config.get<string>('MPESA_REVERSAL_TIMEOUT_URL', ''),
+      QueueTimeOutURL: this.config.get<string>(
+        'MPESA_REVERSAL_TIMEOUT_URL',
+        '',
+      ),
       Remarks: 'OmniBite refund',
       Occasion: 'refund',
     };
